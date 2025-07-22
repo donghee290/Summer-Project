@@ -1,0 +1,17 @@
+{
+  "type": "경제뉴스 수집 요약",
+  "collectionDate": "2025-07-22",
+  "targetDate": "2025-07-21",
+  "results": {
+    "yesterday": {
+      "date": "2025-07-21",
+      "count": 0
+    },
+    "today": {
+      "date": "2025-07-22",
+      "count": 1139
+    }
+  },
+  "totalCollected": 1139,
+  "collectedAt": "2025-07-22T07:37:00.854Z"
+}
