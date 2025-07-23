@@ -2,7 +2,10 @@ import { Request, Response, NextFunction } from "express";
 import { verify } from "../../config/jwt";
 
 export interface AuthRequest extends Request {
-  user?: any;
+  user?: {
+    userNo: number;
+    userId: string;
+  };
 }
 
 export async function verifyToken(req: AuthRequest, res: Response, next: NextFunction) {
@@ -18,7 +21,9 @@ export async function verifyToken(req: AuthRequest, res: Response, next: NextFun
       return res.status(401).json({ message: "유효하지 않은 토큰입니다." });
     }
 
-    req.user = decoded;
+    const { iat, exp, ...userInfo } = decoded as { iat?: number; exp?: number; userNo: number; userId: string; [key: string]: any; };
+    req.user = userInfo;
+
     next();
   } catch (error) {
     console.error(error);

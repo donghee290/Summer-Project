@@ -13,13 +13,20 @@ export const login = async (req: Request, res: Response) => {
 
     const loginResult = await callStoredProcedure<any[]>('WEB_GET_LOGIN', [username, password]);
     const user = (loginResult && loginResult.length > 0) ? loginResult[0] : null;
+    // console.log(user.user_no, user.user_id);
 
     if (user) {
       const payload = {
-        userId: user.id, 
-        username: user.username,
+        userNo: user.user_no, 
+        userId: user.user_id,
       };
-      const token = sign(payload);
+
+      // JWT 토큰 생성
+      // 미들웨어에서 인증 성공 시 user 정보를 넘기기 위함
+      const token = sign({
+        userNo: payload.userNo,
+        userId: payload.userId,
+      });
 
       return res.json({
         message: "로그인 성공",
@@ -36,7 +43,7 @@ export const login = async (req: Request, res: Response) => {
 
 export const testAuth = async (req: AuthRequest, res: Response) => {
   try {
-    res.status(200).json({ message: "Test Success", user: req.user });
+    res.status(200).json({ message: "인증 성공", user: req.user });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "잠시 후 다시 시도해 주세요." });
