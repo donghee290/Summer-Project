@@ -1,10 +1,8 @@
+require('dotenv').config();
+
 const axios = require('axios');
 const fs = require('fs');
 const cheerio = require('cheerio');
-
-// 네이버 API 인증 정보
-const CLIENT_ID = '5cij5EoCu8uziisWyTjY';
-const CLIENT_SECRET = '9vwdjrS6ly';
 
 // 카테고리별 검색 키워드 정의
 const KEYWORDS = {
@@ -24,14 +22,26 @@ const siteSpecificSelectors = {
   'ytn.co.kr': '.paragraph'
 };
 
+const MESSAGE_TOO_SHORT = '본문이 너무 짧거나 의미가 없습니다.';
+const MESSAGE_AD_CONTENT = '광고성 내용이 많이 포함되어 있습니다.';
+const MESSAGE_CRAWL_FAILED = '본문 크롤링 실패';
+const MESSAGE_NOT_FOUND = '본문을 가져올 수 없습니다.';
+
+const MESSAGE_SET = new Set([
+  MESSAGE_TOO_SHORT,
+  MESSAGE_AD_CONTENT,
+  MESSAGE_CRAWL_FAILED,
+  MESSAGE_NOT_FOUND
+]);
+
 // 네이버 뉴스 검색 함수
 async function searchNews(keyword, display = 100) {
   try {
     const response = await axios.get('https://openapi.naver.com/v1/search/news.json', {
       params: { query: keyword, display, start: 1, sort: 'date' },
       headers: {
-        'X-Naver-Client-Id': CLIENT_ID,
-        'X-Naver-Client-Secret': CLIENT_SECRET
+        'X-Naver-Client-Id': process.env.NAVER_CLIENT_ID,
+        'X-Naver-Client-Secret': process.env.NAVER_CLIENT_SECRET,
       }
     });
     return response.data.items || [];
@@ -41,60 +51,33 @@ async function searchNews(keyword, display = 100) {
   }
 }
 
-// ---- [강화판] 본문 텍스트 정제 함수 ----
+// 본문 텍스트 정제 함수
 function cleanNewsContent(content) {
-  if (!content || content.length < 10) return content;
+  if (!content || content.length < 50) return content; // 의미 없는 본문 미리 차단
   content = content.replace(/\s+/g, ' ');
 
-  const unnecessaryPatterns = [
-    // --- 기존 기본 필터 ---//
-@,
-    /function _flash_removeCallback[\s\S]*?}/g,
-    /\/\/ flash 오류를 우회하기 위한 함수 추가[\s\S]*?\/\/ flash 오류를 우회하기 위한 함수 추가/g,
-    /기자\s*[가-힣]+@[a-zA-Z0-9_.-]+\.[a-zA-Z], 연합뉴스.*?기자/g,
-    /\[.*?기자\]/g, \s*기자/g,
-    /ⓒ.*?무단.*?금지/g, 저작권자.*?무단.*?배포.*?금지/g,
-    /Copyright.*?All rights reserved/gi,
-    /무단전재.*?재배포.*?금지/g, \[광고\]/g, \[AD\]/gi,
-    /제공[:：]\s*[가-힣A-Za-z0-]+g, 협찬.*?제공/g,
-    /관련기사/g, ▶.*?바로가기/g, >.*?클릭/g, /더보기.*?클릭g,
-    /페이스북\s*트위터\s*카카오스토리/g, /공유하기\s*스크랩g,
-    /좋아요\s*공유\s*댓글/g, /네이버에서도 확인해보세요g,
-    /이 기사를.*?추천합니다/g, /동영상 뉴스g, /포토 뉴스g,
-    /실시간 뉴스/g, /구독.*?알림g, /팔로우.*?알림g,
-    /뉴스레터.*?구독/g, \[사진=.*?\]g, \[영상=.*?\]/g,
-    /편집자주.*?$/gm, ※.*?$/gm,
-    // --- 추가: 로그인/댓글 UI 안내문구 ---
-    /댓글\s*내용입력\s*\d+\s*\/\s*\d+/g,
-    /댓글\s*정렬\s*BEST댓글.*?자동노출된다\./g,
-    /댓글\s*정렬\s*BEST 댓글.*?자동으로 노출된다\./g,
-    /비밀번호\s*본문\s*\/\s*\d+\s*비밀번호/g,
-    /비밀번호\s*댓글\s*.*?자동등록방지/g,
-    /회원\s*로그인/g, 
-    /(이메일)?무단전재.*?(허가|금지)/gi,
-    /BEST댓글.*?댓글 답글과 추천수를 합산.*?자동으로 노출됩니다\./gi,
-    /내 댓글 모음.*?종합 더보기/gi,
-    /랭킹\s*뉴스/gi, TOP이슈/gi, 매체정보/gi, 키워드.*?(댓글|기사)/gi,
-    /기사제보/gi, 이( 기사가| 기사인| 뉴스| 기사를)? 후원해 주세요,
-    /comments?\s*내용입력.*?BEST댓글/gi,
-    /로그인(하면|하셔야|해서)? .*?(작성|댓글|공유|후원|삭제|블락)/gi,
-    /(반론[권]?|반론신청|정정신청)/gi,
-    /이슈.*?이슈.*?이슈.*?이슈.*?이슈.*?pause/gi, // TOP이슈 등 반복
-    /정치\s*사회\s*경제\s*국제\s*스포츠.*?인터넷신문위원회.*?윤리강령.*?가요\s*방송\s*영화.*?출처=/gi,
-    /다른기사\s*보기?/gi,
-    // 상호중복 블럭 및 만연한 안내
-    /\b(BEST댓글|댓글 내용입력|본문 \/ \d+|회원 로그인|자동등록방지|매체정보|랭킹 뉴스|내 댓글 모음|기사제보|키워드|TOP이슈|댓글 정렬|정치 사회 경제 국제 스포츠 로그인|동영상 뉴스|포토 뉴스|실시간 뉴스)\b/gi,
-    // 하단 주의
-    /^.{0,20}대표전화.*?제호.*?등록번호.*?발행.*?청소년보호책임자.*?무단.*?금지.*제공.*?기호일보.*?company.*?서비스/gi,
+  const patterns = [
+    /기자\s*[가-힣]+\s*\S*@\S+/g,
+    /\[.*?기자\]/g,
+    /ⓒ.*?무단.*?금지/g,
+    /저작권자.*?무단.*?배포.*?금지/g,
+    /\[광고\]/g, /\[AD\]/gi,
+    /관련기사|더보기.*?클릭|▶.*?바로가기|>.*?클릭/g,
+    /댓글.*?입력.*?|BEST댓글.*?/gi,
+    /랭킹\s*뉴스|TOP이슈|실시간 뉴스|매체정보|기사제보/gi,
+    /정치\s*사회\s*경제.*?윤리강령.*?출처=/gi,
+    /대표전화.*?등록번호.*?무단.*?금지/gi
   ];
-  for (const pattern of unnecessaryPatterns) {
+
+  for (const pattern of patterns) {
     content = content.replace(pattern, '');
   }
-  // 문장 시작/끝, 연속 마침표/특수문자 등
+
   content = content.replace(/^[^\w가-힣]+|[^\w가-힣.!?]+$/g, '');
   content = content.replace(/\.{3,}/g, '...');
   content = content.replace(/[!?]{2,}/g, '!');
   content = content.replace(/\s{2,}/g, ' ').trim();
+
   return content;
 }
 
@@ -103,7 +86,13 @@ function isAdvertisementContent(content) {
   const adKeywords = ['광고', '할인', '이벤트', '쿠폰', '혜택', '특가', '세일', '프로모션'];
   const adCount = adKeywords.reduce((count, keyword) =>
     count + (content.split(keyword).length - 1), 0);
-  return adCount > 3;
+  return content.length < 500 && adCount > 2;
+}
+
+function cleanElement($element) {
+  $element.find('script, style, .ad, .advertisement, .related, .tag, .btn, button, .share, .social').remove();
+  $element.find('[class*="ad"], [class*="banner"], [id*="ad"], [id*="banner"]').remove();
+  $element.find('.journalist, .reporter, .copyright, .source').remove();
 }
 
 // 개선된 뉴스 본문 크롤링 함수
@@ -115,14 +104,19 @@ async function getNewsContent(url) {
     });
     const $ = cheerio.load(response.data);
     let content = '';
+
     const domain = new URL(url).hostname;
-    const specificSelector = siteSpecificSelectors[domain];
+    function getSelectorForDomain(hostname) {
+      return Object.entries(siteSpecificSelectors).find(([domain]) =>
+        hostname.includes(domain)
+      )?.[1];
+    }
+    const specificSelector = getSelectorForDomain(domain);
+    
     if (specificSelector) {
       const specificElement = $(specificSelector);
       if (specificElement.length > 0) {
-        specificElement.find('script, style, .ad, .advertisement, .related, .tag, .btn, button, .share, .social').remove();
-        specificElement.find('[class*="ad"], [class*="banner"], [id*="ad"], [id*="banner"]').remove();
-        specificElement.find('.journalist, .reporter, .copyright, .source').remove();
+        cleanElement(specificElement);
         content = specificElement.text().trim();
       }
     }
@@ -135,9 +129,7 @@ async function getNewsContent(url) {
         for (const selector of selectors) {
           const element = $(selector);
           if (element.length > 0) {
-            element.find('script, style, .ad, .advertisement, .related, .tag, .btn, button, .share, .social').remove();
-            element.find('[class*="ad"], [class*="banner"], [id*="ad"], [id*="banner"]').remove();
-            element.find('.journalist, .reporter, .copyright, .source').remove();
+            cleanElement(element);
             content = element.text().trim();
             break;
           }
@@ -150,9 +142,7 @@ async function getNewsContent(url) {
         for (const selector of commonSelectors) {
           const element = $(selector);
           if (element.length > 0) {
-            element.find('script, style, .ad, .advertisement, .related, .tag, .btn, button, .share, .social').remove();
-            element.find('[class*="ad"], [class*="banner"], [id*="ad"], [id*="banner"]').remove();
-            element.find('.journalist, .reporter, .copyright, .source').remove();
+            cleanElement(element);
             content = element.text().trim();
             if (content.length > 100) break;
           }
@@ -197,19 +187,27 @@ function removeDuplicates(newsArray) {
 }
 
 // HTML 태그 제거 함수
-function stripHtmlTags(text) {
-  return text.replace(/<[^>]*>/g, '').replace(/"/g, '"').replace(/</g, '<').replace(/>/g, '>').replace(/&/g, '&');
+function stripHtmlTags(html) {
+  const $ = cheerio.load(html || '');
+  return $.text().trim();
 }
 
 // 네이버 뉴스 URL 생성 함수
-function generateNaverNewsUrl(originalUrl) {
-  if (originalUrl.includes('news.naver.com')) return originalUrl;
-  const oidMatch = originalUrl.match(/oid=(\d+)/);
-  const aidMatch = originalUrl.match(/aid=(\d+)/);
-  if (oidMatch && aidMatch) {
-    return `https://news.naver.com/main/read.naver?oid=${oidMatch[1]}&aid=${aidMatch[1]}`;
+function resolveCrawlUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('naver.com') && parsed.pathname.includes('/article/')) {
+      return url;
+    }
+    const oid = url.match(/oid=(\d+)/)?.[1];
+    const aid = url.match(/aid=(\d+)/)?.[1];
+    if (oid && aid) {
+      return `https://news.naver.com/main/read.naver?oid=${oid}&aid=${aid}`;
+    }
+    return url;
+  } catch {
+    return url;
   }
-  return null;
 }
 
 // 카테고리별 뉴스 수집 함수 (본문 포함)
@@ -232,19 +230,14 @@ async function collectNewsByCategory(category, keywords) {
   for (let i = 0; i < recentNews.length; i++) {
     const item = recentNews[i];
     const originalUrl = item.link;
-    const naverUrl = generateNaverNewsUrl(originalUrl);
+    const naverUrl = resolveCrawlUrl(originalUrl);
     const urlToFetch = naverUrl || originalUrl;
     console.log(` [${i + 1}/${recentNews.length}] 본문 수집 중...`);
     const content = await getNewsContent(urlToFetch);
     let isQualityContent = false;
-    // --- 개선: 광고·짧은 본문 자체 필터링, 의미없음/광고성 배제 ---
-    if (
-      content &&
-      content !== '본문을 가져올 수 없습니다.' &&
-      content !== '본문 크롤링 실패' &&
-      content !== '본문이 너무 짧거나 의미가 없습니다.' &&
-      content !== '광고성 내용이 많이 포함되어 있습니다.'
-    ) {
+
+    // 개선: 광고·짧은 본문 자체 필터링, 의미없음/광고성 배제
+    if (content && !MESSAGE_SET.has(content)) {
       successCount++;
       if (content.length > 500) {
         qualityCount++;
@@ -282,12 +275,7 @@ async function main() {
       (sum, news) =>
         sum +
         news.filter(
-          item =>
-            item.content &&
-            item.content !== '본문을 가져올 수 없습니다.' &&
-            item.content !== '본문 크롤링 실패' &&
-            item.content !== '본문이 너무 짧거나 의미가 없습니다.' &&
-            item.content !== '광고성 내용이 많이 포함되어 있습니다.'
+          item => item.content && !MESSAGE_SET.has(item.content)
         ).length,
       0
     );
@@ -315,7 +303,9 @@ async function main() {
       news: collectedNews
     };
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `naver_news_cleaned_1hour_${timestamp}.json`;
+    const outputDir = './sample_results';
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
+    const filename = `${outputDir}/v3_naver_news_cleaned_1hour_${timestamp}.json`;
     fs.writeFileSync(filename, JSON.stringify(result, null, 2), 'utf8');
     console.log(`\n정제된 뉴스 데이터가 "${filename}" 파일로 저장되었습니다.`);
   } catch (error) {

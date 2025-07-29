@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -209,8 +211,11 @@ class NaverNewsClassifier {
 // 메인 실행 함수
 async function main() {
     try {
-        // 네이버 API 키 설정 (실제 키로 변경 필요)
-        const classifier = new NaverNewsClassifier('5cij5EoCu8uziisWyTjY', '9vwdjrS6ly');
+        // 네이버 API 키 설정
+        const classifier = new NaverNewsClassifier(
+            process.env.NAVER_CLIENT_ID,
+            process.env.NAVER_CLIENT_SECRET
+        );
         
         // 카테고리별 뉴스 수집
         const categorizedNews = await classifier.collectCategorizedNews();
