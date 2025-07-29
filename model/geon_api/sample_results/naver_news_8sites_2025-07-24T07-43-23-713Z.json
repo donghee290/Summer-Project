@@ -1,0 +1,33 @@
+{
+  "metadata": {
+    "collectedAt": "2025-07-24T07:43:23.704Z",
+    "timeRange": "최근 1시간",
+    "targetNewsSites": [
+      "chosun.com",
+      "joins.com",
+      "donga.com",
+      "hani.co.kr",
+      "khan.co.kr",
+      "yna.co.kr",
+      "ytn.co.kr",
+      "sbs.co.kr"
+    ],
+    "executionTimeSeconds": 53,
+    "totalCount": 0,
+    "successCount": 0,
+    "qualityCount": 0,
+    "successRate": null,
+    "qualityRate": null,
+    "siteDistribution": {}
+  },
+  "categories": {
+    "economy": 0,
+    "society": 0,
+    "entertainment": 0
+  },
+  "news": {
+    "economy": [],
+    "society": [],
+    "entertainment": []
+  }
+}
