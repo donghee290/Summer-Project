@@ -11,7 +11,7 @@ async function embedNewsArticles() {
     console.log('1. 뉴스 데이터 파일 로드 중...');
     
     // 파일명을 실제 파일명으로 변경하세요
-    const fileName = 'naver_news_cleaned_1hour_2025-07-28T05-19-21-366Z.json'; // 예시
+    const fileName = 'v3_naver_news_cleaned_1hour_2025-07-29T02-19-57-117Z.json'; // 예시
     
     let newsData;
     try {
