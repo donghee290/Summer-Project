@@ -1,10 +1,8 @@
+require('dotenv').config();
+
 const axios = require('axios');
 const fs = require('fs');
 const cheerio = require('cheerio');
-
-// 네이버 API 인증 정보
-const CLIENT_ID = '5cij5EoCu8uziisWyTjY';
-const CLIENT_SECRET = '9vwdjrS6ly';
 
 // 대표적인 신문사 8개 도메인
 const TARGET_NEWS_SITES = [
@@ -54,8 +52,8 @@ async function searchNewsFromSpecificSites(keyword, display = 100) {
                     sort: 'date'
                 },
                 headers: {
-                    'X-Naver-Client-Id': CLIENT_ID,
-                    'X-Naver-Client-Secret': CLIENT_SECRET
+                    'X-Naver-Client-Id': process.env.NAVER_CLIENT_ID,
+                    'X-Naver-Client-Secret': process.env.NAVER_CLIENT_SECRET,
                 }
             });
             
