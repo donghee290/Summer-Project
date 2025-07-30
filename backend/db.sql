@@ -95,3 +95,31 @@ BEGIN
 END$$
 
 DELIMITER ;
+
+
+
+-- 검색용 프로시져
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS WEB_SEARCH_ARTICLES$$
+
+CREATE PROCEDURE WEB_SEARCH_ARTICLES(
+    IN p_keyword VARCHAR(255),
+    IN p_limit INT,
+    IN p_offset INT
+)
+BEGIN
+    SELECT 
+        article_no, article_title, article_summary, article_content, article_press, article_reg_at
+    FROM 
+        Article
+    WHERE 
+        article_title LIKE CONCAT('%', p_keyword, '%')
+        OR article_summary LIKE CONCAT('%', p_keyword, '%')
+        OR article_content LIKE CONCAT('%', p_keyword, '%')
+    ORDER BY 
+        article_reg_at DESC
+    LIMIT p_limit OFFSET p_offset;
+END$$
+
+DELIMITER ;
