@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: './naverapi.env' });
 
 const axios = require('axios');
 const fs = require('fs');
