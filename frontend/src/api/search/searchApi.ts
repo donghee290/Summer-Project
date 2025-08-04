@@ -1,4 +1,4 @@
-import axios from './axiosInstance';
+import axios from '../axiosInstance';
 
 export interface SearchQuery {
   keyword: string;

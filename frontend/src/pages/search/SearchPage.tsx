@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Button } from '../components/ui/Button';
-import { searchContent, SearchResultItem } from '../api/searchApi';
+import { Button } from '../../components/ui/Button';
+import { searchContent, SearchResultItem } from '../../api/search/searchApi';
 
 export const SearchPage = () => {
   const [keyword, setKeyword] = useState('');
@@ -35,3 +35,5 @@ export const SearchPage = () => {
     </div>
   );
 };
+
+export default SearchPage;

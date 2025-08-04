@@ -1,2 +1,2 @@
-export * from './searchApi';
+export * from './search';
 export * from './user';
