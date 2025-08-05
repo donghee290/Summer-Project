@@ -1,39 +1,54 @@
-import React, { useState } from 'react';
-import { Button } from '../../components/ui/Button';
-import { searchContent, SearchResultItem } from '../../api/search/searchApi';
+import { useState } from "react";
+import { searchContent, SearchQuery, SearchResultItem } from "../../api/search/searchApi";
+import ArticleListItem from "../../components/common/ArticleListItem";
+import DetailSearch from "../../components/common/DetailSearch";
+import { useSearchStore } from '../../store/searchStore';
 
-export const SearchPage = () => {
-  const [keyword, setKeyword] = useState('');
+export default function SearchPage() {
   const [results, setResults] = useState<SearchResultItem[]>([]);
+  const { keyword, category, sort, startDate, endDate, period, press, searchRange, resetSearch } = useSearchStore();
 
   const handleSearch = async () => {
-    if (!keyword) return;
-    const res = await searchContent({ keyword });
-    setResults(res.results);
+    const isEmpty =
+      !keyword && !category && sort === "latest" && !startDate && !endDate && !period;
+
+    if (isEmpty) {
+      setResults([]);
+      resetSearch();
+      return;
+    }
+
+    try {
+      const query: SearchQuery = {
+        keyword,
+        category: category || undefined,
+        sort: sort as "latest" | "popular" | "rating",
+        press: press || undefined,
+        searchRange: searchRange || undefined,
+        page: 1,
+        size: 10,
+      };
+      const data = await searchContent(query);
+      setResults(data.results);
+    } catch (err) {
+      console.error("검색 실패", err);
+    }
   };
 
   return (
-    <div className="p-6">
-      <h1 className="mb-4 text-xl font-bold">검색</h1>
-      <div className="flex gap-2 mb-4">
-        <input
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          placeholder="검색어 입력"
-          className="w-64 px-2 py-1 border rounded"
-        />
-        <Button onClick={handleSearch}>검색</Button>
-      </div>
-      <ul className="space-y-2">
-        {results.map((item) => (
-          <li key={item.id} className="p-2 border rounded">
-            <div className="font-semibold">{item.title}</div>
-            <div className="text-sm text-gray-600">{item.summary}</div>
-          </li>
-        ))}
-      </ul>
+    <div style={{ maxWidth: "800px", margin: "0 auto", padding: "20px" }}>
+      <DetailSearch onSearch={handleSearch} />
+      {results.length > 0 && (
+        <div style={{ marginTop: "20px" }}>
+          {results.map(item => (
+            <ArticleListItem
+              key={item.id}
+              {...item}
+              onClick={(id) => console.log("Clicked article:", id)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
-};
-
-export default SearchPage;
+}
