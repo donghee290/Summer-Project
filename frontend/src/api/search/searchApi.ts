@@ -4,6 +4,8 @@ export interface SearchQuery {
   keyword: string;
   category?: string;
   sort?: 'latest' | 'popular' | 'rating';
+  press?: string;
+  searchRange?: string;
   page?: number;
   size?: number;
 }
@@ -15,6 +17,10 @@ export interface SearchResultItem {
   category: string;
   date: string;
   thumbnailUrl?: string;
+  press?: string;
+  author?: string;
+  rating?: number;
+  likes?: number;
 }
 
 export interface SearchResponse {
