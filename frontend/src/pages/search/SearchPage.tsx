@@ -6,7 +6,7 @@ import { useSearchStore } from '../../store/searchStore';
 
 export default function SearchPage() {
   const [results, setResults] = useState<SearchResultItem[]>([]);
-  const { keyword, category, sort, startDate, endDate, period, press, searchRange, resetSearch } = useSearchStore();
+  const { keyword, category, sort, startDate, endDate, period, searchRange, resetSearch } = useSearchStore();
 
   const handleSearch = async () => {
     const isEmpty =
@@ -23,7 +23,6 @@ export default function SearchPage() {
         keyword,
         category: category || undefined,
         sort: sort as "latest" | "popular" | "rating",
-        press: press || undefined,
         searchRange: searchRange || undefined,
         page: 1,
         size: 10,

@@ -19,7 +19,6 @@ export default function DetailSearch({ onSearch }: DetailSearchProps) {
     startDate, setStartDate,
     endDate, setEndDate,
     period, setPeriod,
-    press, setPress,
     searchRange, setSearchRange,
     historyTags, addHistoryTag, removeHistoryTag, clearHistoryTags
   } = useSearchStore();
@@ -35,12 +34,6 @@ export default function DetailSearch({ onSearch }: DetailSearchProps) {
     { value: "popular", label: "인기순" },
     { value: "rating", label: "평점순" }
   ];
-  const pressOptions = [
-    { value: "", label: "전체 신문사" },
-    { value: "chosun", label: "조선일보" },
-    { value: "joongang", label: "중앙일보" },
-    { value: "hani", label: "한겨레" },
-  ]
   const searchRangeOptions = [
     { value: "title", label: "제목만" },
     { value: "content", label: "본문만" },
@@ -64,9 +57,8 @@ export default function DetailSearch({ onSearch }: DetailSearchProps) {
         <Dropdown options={categoryOptions} value={category} onChange={e => setCategory(e.target.value)} />
         <Dropdown options={sortOptions} value={sort} onChange={e => setSort(e.target.value)} />
       </div>
-      {/* 신문사 & 검색 범위 */}
+      {/* 검색 범위 */}
         <div>
-        <Dropdown options={pressOptions} value={press} onChange={e => setPress(e.target.value)} />
         <Dropdown options={searchRangeOptions} value={searchRange} onChange={e => setSearchRange(e.target.value)} />
         </div>
       {/* 날짜 선택 */}
