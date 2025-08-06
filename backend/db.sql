@@ -25,17 +25,20 @@ CREATE TABLE User(
 CREATE TABLE Article(
     article_no INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
     article_title VARCHAR(255) NOT NULL,
-    article_summary VARCHAR(500) NULL,
-    article_content TEXT NOT NULL,
+    article_summary VARCHAR(500) NULL,  -- 세줄요약
+    article_content TEXT NOT NULL,  -- 본문 내용
     article_image BLOB NULL, 
     article_category VARCHAR(50) NULL,
-    article_press VARCHAR(100) NOT NULL,
+    article_press VARCHAR(100) NOT NULL,   -- 신문사 
     article_source TEXT NOT NULL, 
-    article_author VARCHAR(100) NULL, 
-    article_reg_at DATETIME NOT NULL, 
-    article_update_at DATETIME NOT NULL
+    -- article_author VARCHAR(100) NULL, 
+    article_reg_at DATETIME NOT NULL,  -- 작성일
+    article_update_at DATETIME NOT NULL,  -- 수정일
+    article_like_count INT DEFAULT 0,
+    article_rating_avg DECIMAL(2, 1) DEFAULT 0.0,
+    article_view_count INT DEFAULT 0
 );
-
+-- 좋아요 수, 평점 평균, 조회수 컬럼 추가 작성자 삭제
 
 
 -- 북마크 테이블
@@ -43,6 +46,7 @@ CREATE TABLE Article(
 CREATE TABLE Bookmark(
     user_no INT NOT NULL,
     article_no INT NOT NULL,
+    bookmark_reg_at DATETIME NOT NULL,
     PRIMARY KEY (user_no, article_no),
     FOREIGN KEY (user_no) REFERENCES User(user_no) ON DELETE CASCADE,
     FOREIGN KEY (article_no) REFERENCES Article(article_no) ON DELETE CASCADE

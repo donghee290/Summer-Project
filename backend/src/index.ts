@@ -7,6 +7,8 @@ import { swaggerSpec} from './swagger/swagger';
 
 import userRouter from "./routes/user/userRouter";
 import searchRouter from "./routes/search/searchRouter";
+import articleRouter from "./routes/article/articleRouter";
+
 
 dotenv.config();
 
@@ -25,7 +27,7 @@ app.use(express.urlencoded({ extended: true })); // URL 인코딩 파싱
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use("/api/user", userRouter);
 app.use("/api/search", searchRouter);
-
+app.use("/api/article", articleRouter);
 
 app.listen(PORT, () => {
   console.log(`Server listening at http://localhost:${PORT}`);
