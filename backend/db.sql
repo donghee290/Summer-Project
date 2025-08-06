@@ -29,7 +29,6 @@ CREATE TABLE Article(
     article_content TEXT NOT NULL,  -- 본문 내용
     article_image BLOB NULL, 
     article_category VARCHAR(50) NULL,
-    article_press VARCHAR(100) NOT NULL,   -- 신문사 
     article_source TEXT NOT NULL, 
     -- article_author VARCHAR(100) NULL, 
     article_reg_at DATETIME NOT NULL,  -- 작성일
@@ -109,20 +108,47 @@ DROP PROCEDURE IF EXISTS WEB_SEARCH_ARTICLES$$
 
 CREATE PROCEDURE WEB_SEARCH_ARTICLES(
     IN p_keyword VARCHAR(255),
+    IN p_category VARCHAR(50),
+    IN p_searchRange VARCHAR(20),
+    IN p_sort VARCHAR(20),
+    IN p_startDate DATETIME,
+    IN p_endDate DATETIME,
     IN p_limit INT,
     IN p_offset INT
 )
 BEGIN
     SELECT 
-        article_no, article_title, article_summary, article_content, article_press, article_reg_at
-    FROM 
-        Article
-    WHERE 
-        article_title LIKE CONCAT('%', p_keyword, '%')
-        OR article_summary LIKE CONCAT('%', p_keyword, '%')
-        OR article_content LIKE CONCAT('%', p_keyword, '%')
-    ORDER BY 
-        article_reg_at DESC
+        article_no,
+        article_title,
+        article_summary,
+        article_content,
+        article_category,
+        article_reg_at,
+        article_like_count,
+        article_rating_avg
+    FROM Article
+    WHERE
+        -- 검색 범위
+        (
+            (p_searchRange = 'title' AND article_title LIKE CONCAT('%', p_keyword, '%'))
+            OR (p_searchRange = 'content' AND article_content LIKE CONCAT('%', p_keyword, '%'))
+            OR (p_searchRange = 'title_content' AND 
+                (article_title LIKE CONCAT('%', p_keyword, '%') 
+                 OR article_content LIKE CONCAT('%', p_keyword, '%')))
+            OR (p_searchRange IS NULL OR p_searchRange = '')
+        )
+        -- 카테고리 필터
+        AND (p_category IS NULL OR p_category = '' OR article_category = p_category)
+        -- 날짜 필터
+        AND (p_startDate IS NULL OR p_endDate IS NULL 
+             OR article_reg_at BETWEEN p_startDate AND p_endDate)
+    ORDER BY
+        CASE 
+            WHEN p_sort = 'latest' THEN article_reg_at
+            WHEN p_sort = 'popular' THEN article_like_count
+            WHEN p_sort = 'rating' THEN article_rating_avg
+            ELSE article_reg_at
+        END DESC
     LIMIT p_limit OFFSET p_offset;
 END$$
 

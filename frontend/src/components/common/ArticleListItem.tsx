@@ -1,4 +1,6 @@
 import React from "react";
+import StarRate from "./StarRate";
+import LikeButton from "./LikeButton";
 
 export interface ArticleListItemProps {
   id: string;
@@ -48,10 +50,13 @@ export default function ArticleListItem({
         <p>{summary}</p>
         <div>
           {rating !== undefined && (
-            <span>별점 {rating.toFixed(1)}</span>
+            <>
+              <StarRate count={Math.round(rating)} />
+              <span>{rating.toFixed(1)}</span>
+            </>
           )}
           {likes !== undefined && (
-            <span>좋아요 {likes}</span>
+            <LikeButton count={likes} />
           )}
         </div>
       </div>

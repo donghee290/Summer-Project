@@ -8,7 +8,7 @@ interface StarRatingProps {
   color?: string;
 }
 
-export function StarRating({ count = 0, size, color }: StarRatingProps) {
+export default function StarRate({ count = 0, size, color }: StarRatingProps) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
       {Array.from({ length: count }, (_, idx) => (
