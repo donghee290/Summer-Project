@@ -6,6 +6,7 @@ import { useSearchStore } from '../../store/searchStore';
 
 export default function SearchPage() {
   const [results, setResults] = useState<SearchResultItem[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
   const { keyword, category, sort, startDate, endDate, period, searchRange, resetSearch } = useSearchStore();
 
   const handleSearch = async () => {
@@ -15,6 +16,7 @@ export default function SearchPage() {
     if (isEmpty) {
       setResults([]);
       resetSearch();
+      setHasSearched(true);
       return;
     }
 
@@ -24,6 +26,8 @@ export default function SearchPage() {
         category: category || undefined,
         sort: sort as "latest" | "popular" | "rating",
         searchRange: searchRange || undefined,
+        startDate: startDate ? startDate.toISOString().split("T")[0] : undefined,
+        endDate: endDate ? endDate.toISOString().split("T")[0] : undefined,
         page: 1,
         size: 10,
       };
@@ -31,6 +35,9 @@ export default function SearchPage() {
       setResults(data.results);
     } catch (err) {
       console.error("검색 실패", err);
+      setResults([]);
+    } finally {
+      setHasSearched(true);
     }
   };
 
@@ -39,6 +46,9 @@ export default function SearchPage() {
       <DetailSearch onSearch={handleSearch} />
       {results.length > 0 && (
         <div style={{ marginTop: "20px" }}>
+          {hasSearched && results.length === 0 && (
+            <p>검색 결과가 없습니다.</p>
+          )}
           {results.map(item => (
             <ArticleListItem
               key={item.id}

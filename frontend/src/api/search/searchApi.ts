@@ -18,7 +18,6 @@ export interface SearchResultItem {
   category: string;
   date: string;
   thumbnailUrl?: string;
-  author?: string;
   rating?: number;
   likes?: number;
 }
@@ -46,7 +45,22 @@ export const searchContent = async (
       offset: (page - 1) * size
     }
   });
-  return res.data;
+
+  const mappedResults: SearchResultItem[] = res.data.results.map((item: any) => ({
+    id: String(item.article_no),
+    title: item.article_title,
+    summary: item.article_summary,
+    category: item.article_category,
+    date: item.article_reg_at,
+    rating: item.article_rate_avg,
+    likes: item.article_like_count,
+    thumbnailUrl: item.article_image ? `/uploads/${item.article_image}` : undefined
+  }));
+
+  return {
+    total: mappedResults.length,
+    results: mappedResults
+  };
 };
 
 export const fetchSearchDetail = async (

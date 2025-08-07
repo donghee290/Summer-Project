@@ -9,8 +9,6 @@ export interface ArticleListItemProps {
   category: string;
   date: string;
   thumbnailUrl?: string;
-  press?: string;
-  author?: string;
   rating?: number;
   likes?: number;
   onClick?: (id: string) => void;
@@ -32,32 +30,58 @@ export default function ArticleListItem({
   };
 
   return (
-    <div onClick={handleClick} style={{ cursor: "pointer" }}>
-      <div>
+    <div
+      onClick={handleClick}
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: "16px",
+        cursor: "pointer",
+        borderBottom: "1px solid #ddd",
+        padding: "16px 0",
+      }}
+    >
+      {/* 썸네일 */}
+      <div style={{ width: "120px", height: "80px", flexShrink: 0 }}>
         {thumbnailUrl ? (
-          <img src={thumbnailUrl} alt={title} />
+          <img
+            src={thumbnailUrl}
+            alt={title}
+            style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "4px" }}
+          />
         ) : (
-          <div>이미지</div>
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              backgroundColor: "#eee",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "12px",
+              color: "#888",
+              borderRadius: "4px"
+            }}
+          >
+            이미지 없음
+          </div>
         )}
       </div>
 
-      <div>
-        <h3>{title}</h3>
-        <div>
-          <span>{category}</span>
+      {/* 텍스트 영역 */}
+      <div style={{ flex: 1 }}>
+        <h3 style={{ margin: "0 0 8px", fontSize: "18px", fontWeight: "bold" }}>{title}</h3>
+
+        <div style={{ marginBottom: "4px", fontSize: "14px", color: "#666" }}>
+          <span style={{ marginRight: "8px" }}>{category}</span>
           <span>{date}</span>
         </div>
-        <p>{summary}</p>
-        <div>
-          {rating !== undefined && (
-            <>
-              <StarRate count={Math.round(rating)} />
-              <span>{rating.toFixed(1)}</span>
-            </>
-          )}
-          {likes !== undefined && (
-            <LikeButton count={likes} />
-          )}
+
+        <p style={{ margin: "8px 0", fontSize: "15px", color: "#333" }}>{summary}</p>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {rating !== undefined && <span>{rating}</span>}
+          {likes !== undefined && <LikeButton count={likes} />}
         </div>
       </div>
     </div>
