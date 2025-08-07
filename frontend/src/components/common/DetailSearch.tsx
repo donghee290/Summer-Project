@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+
 import DateSelect from "../../components/ui/DateSelect";
 import Dropdown from "../../components/ui/Dropdown";
 import Input from "../../components/ui/Input";
@@ -24,10 +26,11 @@ export default function DetailSearch({ onSearch }: DetailSearchProps) {
   } = useSearchStore();
 
   const categoryOptions = [
-    { value: "1", label: "카테고리1" },
-    { value: "2", label: "카테고리2" },
-    { value: "3", label: "카테고리3" },
-    { value: "4", label: "카테고리4" }
+    { value: "", label: "전체" },
+    { value: "국내경제", label: "국내경제" },
+    { value: "사회경제", label: "사회경제" },
+    { value: "사회", label: "사회" },
+    { value: "트렌드", label: "트렌드" }
   ];
   const sortOptions = [
     { value: "latest", label: "최신순" },
@@ -41,9 +44,52 @@ export default function DetailSearch({ onSearch }: DetailSearchProps) {
   ];
 
   const handleClick = () => {
+    const isAlreadySearched =
+      keyword === "" &&
+      category === "" &&
+      sort === "latest" &&
+      searchRange === "" &&
+      !startDate &&
+      !endDate &&
+      period === "";
+
+    if (isAlreadySearched) {
+      setKeyword("");
+      setCategory("");
+      setSort("latest");
+      setSearchRange("");
+      setStartDate(null);
+      setEndDate(null);
+      setPeriod("");
+      clearHistoryTags();
+      return;
+    }
+
     if (keyword.trim()) addHistoryTag(keyword);
     onSearch();
   };
+
+  useEffect(() => {
+    const now = new Date();
+    let newStartDate: Date | null = null;
+
+    switch (period) {
+      case "1w":
+        newStartDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case "1m":
+        newStartDate = new Date(now.setMonth(now.getMonth() - 1));
+        break;
+      case "3m":
+        newStartDate = new Date(now.setMonth(now.getMonth() - 3));
+        break;
+    }
+
+    if (newStartDate) {
+      setStartDate(newStartDate);
+      setEndDate(new Date());
+    }
+  }, [period]);
 
   return (
     <div>

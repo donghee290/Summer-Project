@@ -2,7 +2,7 @@ import axios from 'axios';
 
 async function testSearchAPI() {
   try {
-    const res = await axios.get('http://localhost:8080/api/search/search', {
+    const res = await axios.get('http://localhost:8080/api/search', {
       params: {
         keyword: 'AI',
         category: '트렌드',

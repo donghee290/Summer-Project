@@ -8,7 +8,6 @@ interface SearchState {
   startDate: Date | null;
   endDate: Date | null;
   period: string;
-  press: string;
   searchRange: string;
 
   // 히스토리 태그
@@ -20,7 +19,6 @@ interface SearchState {
   setStartDate: (date: Date | null) => void;
   setEndDate: (date: Date | null) => void;
   setPeriod: (value: string) => void;
-  setPress: (value: string) => void;
   setSearchRange: (value: string) => void;
 
   addHistoryTag: (tag: string) => void;
@@ -37,8 +35,7 @@ export const useSearchStore = create<SearchState>((set) => ({
   startDate: null,
   endDate: null,
   period: "",
-  press: "",
-  searchRange: "",
+  searchRange: "title_content",
   historyTags: [],
 
   setKeyword: (value) => set({ keyword: value }),
@@ -47,7 +44,6 @@ export const useSearchStore = create<SearchState>((set) => ({
   setStartDate: (date) => set({ startDate: date }),
   setEndDate: (date) => set({ endDate: date }),
   setPeriod: (value) => set({ period: value }),
-  setPress: (value: string) => set({ press: value }),
   setSearchRange: (value: string) => set({ searchRange: value }),
 
   addHistoryTag: (tag) =>
@@ -72,8 +68,7 @@ export const useSearchStore = create<SearchState>((set) => ({
       startDate: null,
       endDate: null,
       period: "",
-      press: "",
-      searchRange: "",
+      searchRange: "title_content",
       historyTags: [],
     }),
 }));
