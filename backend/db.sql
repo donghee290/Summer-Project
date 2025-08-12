@@ -31,7 +31,7 @@ CREATE TABLE Article(
     article_update_at DATETIME NULL,
     article_like_count INT DEFAULT 0,
     article_rate_avg DECIMAL(2, 1) DEFAULT 0.0,
-    article_view_count INT DEFAULT 0,
+    article_view_count INT DEFAULT 0
 );
 
 -- 출처 테이블
@@ -79,7 +79,7 @@ CREATE TABLE Article_Rate(
 CREATE TABLE Article_Likes(
     user_no INT NOT NULL,
     article_no INT NOT NULL,
-    is_liked BOOLEAN DEFAULT TRUE;
+    is_liked BOOLEAN DEFAULT TRUE,
     PRIMARY KEY (user_no, article_no),
     FOREIGN KEY (user_no) REFERENCES User(user_no) ON DELETE CASCADE,
     FOREIGN KEY (article_no) REFERENCES Article(article_no) ON DELETE CASCADE

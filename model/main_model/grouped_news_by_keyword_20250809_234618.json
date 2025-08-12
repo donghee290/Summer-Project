@@ -1,0 +1,30 @@
+{
+  "metadata": {
+    "analysis_date": "2025-08-09T23:46:18.266559",
+    "source_file": "v3_naver_news_cleaned_1hour_2025-08-05T01-50-18-041Z.json",
+    "total_articles": 0,
+    "target_categories": [
+      "사회",
+      "경제",
+      "연예"
+    ],
+    "method": "content-only-category-inference + keyword-DF-grouping(v9)"
+  },
+  "results": {
+    "사회": {
+      "article_count": 0,
+      "group_count": 0,
+      "groups": []
+    },
+    "경제": {
+      "article_count": 0,
+      "group_count": 0,
+      "groups": []
+    },
+    "연예": {
+      "article_count": 0,
+      "group_count": 0,
+      "groups": []
+    }
+  }
+}
