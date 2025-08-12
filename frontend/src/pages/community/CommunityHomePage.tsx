@@ -1,136 +1,99 @@
 // src/pages/community/CommunityHomePage.tsx
+import React, { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { FaHeart, FaRegHeart, FaRegComment } from "react-icons/fa";
+import { dummyPosts } from "../../data/dummyData";
+import { PostComposer } from "../../pages/community/PostComposer";
+import type { PostDraft, RepositoryRef } from "../../pages/community/PostComposer";
 
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-
-interface DummyPost {
+interface Post {
   id: number;
+  title: string;
   content: string;
-  repository: {
-    id: number;
-    name: string;
-  };
+  repository: { id: number; name: string };
+  image: string;
+  author: string;
+  likes: number;
+  comments: number;
+  liked: boolean;
 }
-
-const dummyPosts: DummyPost[] = [
-  {
-    id: 1,
-    content: '프론트엔드 컴포넌트 분리하는 방법 정리해봤어요!',
-    repository: { id: 101, name: 'frontend-tips' },
-  },
-  {
-    id: 2,
-    content: '백엔드 라우터 설계는 이렇게 하면 효율적이에요.',
-    repository: { id: 102, name: 'backend-guide' },
-  },
-];
-
-// 로그인 상태라고 가정
-const isLoggedIn = true;
 
 export const CommunityHomePage = () => {
   const navigate = useNavigate();
+  const [posts, setPosts] = useState<Post[]>(dummyPosts);
+  const [showComposer, setShowComposer] = useState(false);
 
-  const [likes, setLikes] = useState<{ [postId: number]: boolean }>({});
-  const [comments, setComments] = useState<{ [postId: number]: string[] }>({});
-  const [inputValues, setInputValues] = useState<{ [postId: number]: string }>({});
+  // 저장소 목록(중복 제거)
+  const repositories: RepositoryRef[] = useMemo(() => {
+    const map = new Map<number, string>();
+    posts.forEach((p) => map.set(p.repository.id, p.repository.name));
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [posts]);
 
-  const handleToggleLike = (postId: number) => {
-    setLikes((prev) => ({ ...prev, [postId]: !prev[postId] }));
+  // ✅ draft 객체 그대로 받음
+  const handleAddPost = (draft: PostDraft) => {
+    const repo = repositories.find((r) => r.id === draft.repositoryId);
+    if (!repo) return;
+
+    const newPost: Post = {
+      id: (posts[0]?.id ?? 0) + 1,
+      title: draft.title,
+      content: draft.content,
+      repository: { id: repo.id, name: repo.name },
+      image: draft.image || "https://via.placeholder.com/80x80?text=New",
+      author: "현재유저",
+      likes: 0,
+      comments: 0,
+      liked: false,
+    };
+    setPosts((prev) => [newPost, ...prev]);
+    setShowComposer(false);
   };
 
-  const handleAddComment = (postId: number) => {
-    const newComment = inputValues[postId]?.trim();
-    if (!newComment) return;
-    setComments((prev) => ({
-      ...prev,
-      [postId]: [...(prev[postId] || []), newComment],
-    }));
-    setInputValues((prev) => ({ ...prev, [postId]: '' }));
+  const handleLikeToggle = (postId: number) => {
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId ? { ...p, liked: !p.liked, likes: p.liked ? p.likes - 1 : p.likes + 1 } : p
+      )
+    );
   };
 
-  const handleChangeInput = (postId: number, value: string) => {
-    setInputValues((prev) => ({ ...prev, [postId]: value }));
-  };
-
-  const handleRepoClick = (repoId: number) => {
-    navigate(`/community/repository/${repoId}`);
-  };
-
-  const handlePostClick = (postId: number) => {
-    navigate(`/community/post/${postId}`);
+  const handleRepositoryClick = (repositoryId: number) => {
+    navigate(`/community/repository/${repositoryId}`);
   };
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">🧠 커뮤니티 게시판</h1>
+    <div style={{ padding: "20px" }}>
+      <button onClick={() => setShowComposer(v => !v)} style={{ padding: "8px 16px", marginBottom: 16 }}>
+        {showComposer ? "작성창 닫기" : "게시글 작성하기"}
+      </button>
 
-      {dummyPosts.map((post) => (
-        <div
-          key={post.id}
-          className="border rounded p-4 mb-6 shadow-sm"
-        >
-          <div className="text-sm text-gray-500 mb-1">
-            저장소:{" "}
-            <span
-              onClick={() => handleRepoClick(post.repository.id)}
-              className="text-blue-600 hover:underline cursor-pointer"
-            >
+      {showComposer && (
+        <PostComposer repositories={repositories} onSubmit={handleAddPost} />
+      )}
+
+      {posts.map((post) => (
+        <div key={post.id} style={{ display: "flex", borderBottom: "1px solid #ccc", padding: "16px 0", alignItems: "flex-start", justifyContent: "space-between" }}>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: "13px", color: "#777", cursor: "pointer" }}
+               onClick={() => handleRepositoryClick(post.repository.id)}>
               {post.repository.name}
-            </span>
-          </div>
-
-          <p
-            onClick={() => handlePostClick(post.id)}
-            className="mb-2 cursor-pointer hover:underline"
-          >
-            {post.content}
-          </p>
-
-          {isLoggedIn ? (
-            <div>
-              {/* 좋아요 버튼 */}
-              <button
-                onClick={() => handleToggleLike(post.id)}
-                className={`mr-4 text-sm ${
-                  likes[post.id] ? 'text-red-500 font-bold' : 'text-gray-500'
-                }`}
-              >
-                ❤️ 좋아요
-              </button>
-
-              {/* 댓글 입력 */}
-              <div className="mt-4">
-                <input
-                  value={inputValues[post.id] || ''}
-                  onChange={(e) => handleChangeInput(post.id, e.target.value)}
-                  placeholder="댓글을 입력하세요"
-                  className="border px-2 py-1 rounded w-full mb-2"
-                />
-                <button
-                  onClick={() => handleAddComment(post.id)}
-                  className="text-sm text-white bg-blue-600 px-3 py-1 rounded hover:bg-blue-700"
-                >
-                  댓글 작성
-                </button>
+            </p>
+            <div style={{ cursor: "pointer" }} onClick={() => navigate(`/community/post/${post.id}`)}>
+              <h3 style={{ margin: "6px 0" }}>{post.title}</h3>
+              <p style={{ color: "#555" }}>{post.content}</p>
+              <div style={{ display: "flex", alignItems: "center", marginTop: "8px" }}>
+                <span onClick={(e) => { e.stopPropagation(); handleLikeToggle(post.id); }}
+                      style={{ cursor: "pointer", display: "flex", alignItems: "center", marginRight: "16px" }}>
+                  {post.liked ? <FaHeart color="red" /> : <FaRegHeart />} &nbsp;{post.likes}
+                </span>
+                <span style={{ display: "flex", alignItems: "center", marginRight: "16px" }}>
+                  <FaRegComment /> &nbsp;{post.comments}
+                </span>
+                <span>{post.author}</span>
               </div>
-
-              {/* 댓글 목록 */}
-              {comments[post.id]?.length > 0 && (
-                <ul className="mt-4 space-y-1 text-sm text-gray-800">
-                  {comments[post.id].map((comment, index) => (
-                    <li key={index} className="border p-2 rounded bg-gray-50">
-                      {comment}
-                    </li>
-                  ))}
-                </ul>
-              )}
             </div>
-          ) : (
-            <div className="text-right text-sm text-gray-400 italic mt-4">
-              로그인 후 좋아요/댓글을 달 수 있습니다.
-            </div>
-          )}
+          </div>
         </div>
       ))}
     </div>
