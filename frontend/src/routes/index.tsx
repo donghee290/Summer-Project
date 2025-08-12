@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { HomePage } from "../pages/HomePage";
 import { SearchPage } from "../pages/search";
 import { LoginPage, RegisterPage, PasswordResetPage } from "../pages/user";
+import { ArticleListPage, ArticleDetailPage } from "../pages/article";
+
 
 const AppRoutes = () => (
   <BrowserRouter>

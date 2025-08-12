@@ -1,19 +1,20 @@
 import axios from '../axiosInstance';
 
 // ===== 타입 정의 =====
+// 일부 필드를 optional/nullable로 조정
 export interface Article {
   article_no: number;
   article_title: string;
   article_summary: string;
   article_content: string;
   article_category: string;
-  article_press: string;
-  article_source: string;
+  article_press?: string | null;
+  article_source?: string | null;
   article_reg_at: string;
-  article_update_at: string;
-  article_like_count: number;
-  article_rating_avg: number;
-  article_view_count: number;
+  article_update_at?: string | null;
+  article_like_count?: number;          // 서버가 안 줄 수도 있어 optional
+  article_rating_avg?: number | null;   // 평균이 없을 때 null 가능
+  article_view_count?: number;
 }
 
 export interface ArticleListItem {
@@ -21,10 +22,10 @@ export interface ArticleListItem {
   article_title: string;
   article_summary: string;
   article_category: string;
-  article_press: string;
+  article_press?: string | null;
   article_reg_at: string;
-  avg_rating: number;
-  likes_count: number;
+  avg_rating?: number | null;           // null/미제공 가능성
+  likes_count?: number;
 }
 
 export interface UserInteractions {
@@ -34,14 +35,16 @@ export interface UserInteractions {
   userRating: number | null;
 }
 
+// 그대로 OK
 export interface ArticleDetailResponse {
   success: boolean;
   data: {
-    article: Article[];
+    article: Article[]; // 단건이어도 배열로 오는 케이스 대응
     userInteractions: UserInteractions;
   };
 }
 
+// 그대로 OK
 export interface ArticleListResponse {
   success: boolean;
   data: {
@@ -57,20 +60,21 @@ export interface ArticleListResponse {
 
 export interface BookmarkResponse {
   success: boolean;
-  message: string;
+  message?: string;        // 메시지 항상 오지 않으면 optional
   bookmarked: boolean;
 }
 
 export interface LikeResponse {
   success: boolean;
-  message: string;
+  message?: string;
   liked: boolean;
+  likeCount?: number;      // 서버가 주면 사용
 }
 
 export interface RatingResponse {
   success: boolean;
-  message: string;
-  data: {
+  message?: string;
+  data?: {
     userRating: number;
     avgRating: number;
     ratingCount: number;
