@@ -49,3 +49,83 @@ export const testAuth = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ message: "잠시 후 다시 시도해 주세요." });
   }
 }; 
+
+// 아이디 중복 확인
+export const checkUserId = async (req: Request, res: Response) => {
+  const username = (req.query.username as string) || (req.query.user_id as string);
+  if (!username) {
+    return res.status(400).json({ message: "아이디가 필요합니다." });
+  }
+
+  try {
+    const idCheckResult = await callStoredProcedure<any[]>("WEB_GET_ID_CHECK", [username]);
+    const count = idCheckResult && idCheckResult[0] ? idCheckResult[0].count : 0;
+    return res.status(200).json({ available: count === 0 });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "서버 오류가 발생했습니다." });
+  }
+};
+
+// 회원가입
+export const register = async (req: Request, res: Response) => {
+  const { username, password, email } = req.body as {
+    username?: string;
+    password?: string;
+    email?: string;
+  };
+
+  if (!username || !password || !email) {
+    return res.status(400).json({ message: "아이디, 비밀번호, 이메일을 모두 입력해주세요." });
+  }
+
+  try {
+    const registerResult = await callStoredProcedure<any[]>(
+      "WEB_SET_USER_REGISTER",
+      [username, password, email]
+    );
+
+    const row = registerResult && registerResult[0] ? registerResult[0] : null;
+    if (!row) {
+      return res.status(500).json({ message: "회원가입 처리 중 오류가 발생했습니다." });
+    }
+
+    if (row.success === 0 || row.code === "DUPLICATE") {
+      return res.status(409).json({ message: "이미 사용중인 아이디입니다." });
+    }
+
+    return res.status(201).json({ message: "회원가입이 완료되었습니다." });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "서버 오류가 발생했습니다." });
+  }
+};
+
+// 비밀번호 초기화 (아이디+이메일 검증 후 4자리 숫자 난수로 초기화, MD5 저장)
+export const resetPassword = async (req: Request, res: Response) => {
+  const { username, email } = req.body as { username?: string; email?: string };
+  if (!username || !email) {
+    return res.status(400).json({ message: "아이디와 이메일을 모두 입력해주세요." });
+  }
+
+  try {
+    const spResult = await callStoredProcedure<any[]>(
+      "WEB_SET_USER_PW_RESET",
+      [username, email]
+    );
+
+    const row = spResult && spResult[0] ? spResult[0] : null;
+    if (!row) {
+      return res.status(500).json({ message: "비밀번호 초기화 처리 중 오류가 발생했습니다." });
+    }
+
+    if (row.success === 0 || row.code === "NOT_FOUND") {
+      return res.status(404).json({ message: "일치하는 사용자 정보를 찾을 수 없습니다." });
+    }
+
+    return res.status(200).json({ message: "비밀번호가 초기화되었습니다.", tempPassword: row.tempPassword });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "서버 오류가 발생했습니다." });
+  }
+};

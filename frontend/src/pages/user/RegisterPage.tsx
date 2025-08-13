@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { register } from '../../api/user/userApi';
-import { UserForm, FormInput, FormButton, ErrorMessage } from '../../components/user';
+import { register, checkDuplicateId } from '../../api/user/userApi';
+import { UserForm, FormInput, FormButton, ErrorMessage, SuccessMessage } from '../../components/user';
 
 const RegisterPage: React.FC = () => {
   const [username, setUsername] = useState<string>('');
@@ -9,6 +9,8 @@ const RegisterPage: React.FC = () => {
   const [email, setEmail] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [dupCheckMessage, setDupCheckMessage] = useState<string>('');
+  const [isIdAvailable, setIsIdAvailable] = useState<boolean | null>(null);
 
   const navigate = useNavigate();
 
@@ -18,11 +20,18 @@ const RegisterPage: React.FC = () => {
       return;
     }
 
+    if (isIdAvailable !== true) {
+      setError('아이디 중복 확인을 먼저 진행해주세요.');
+      alert('아이디 중복 확인을 먼저 진행해주세요.');
+      return;
+    }
+
     setIsLoading(true);
     setError('');
 
     try {
       await register({ username, password, email });
+      alert('회원가입이 완료되었습니다.');
       navigate('/user/login');
     } catch (err: any) {
       setError(err.response?.data?.message || '회원가입에 실패했습니다.');
@@ -31,17 +40,53 @@ const RegisterPage: React.FC = () => {
     }
   };
 
+  const handleCheckDuplicate = async () => {
+    setError('');
+    setDupCheckMessage('');
+    setIsIdAvailable(null);
+    if (!username) {
+      setError('아이디를 입력해주세요.');
+      return;
+    }
+    try {
+      const { available } = await checkDuplicateId(username);
+      setIsIdAvailable(available);
+      setDupCheckMessage(available ? '사용 가능한 아이디입니다.' : '이미 사용중인 아이디입니다.');
+    } catch (err: any) {
+      setError(err.response?.data?.message || '중복 확인 중 오류가 발생했습니다.');
+    }
+  };
+
   return (
     <UserForm title="회원가입">
       <ErrorMessage message={error} />
       
-      <FormInput
-        type="text"
-        placeholder="아이디를 입력해주세요"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        required
-      />
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <FormInput
+            type="text"
+            placeholder="아이디를 입력해주세요"
+            value={username}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              setIsIdAvailable(null);
+              setDupCheckMessage('');
+            }}
+            required
+          />
+        </div>
+        <FormButton onClick={handleCheckDuplicate} fullWidth={false} variant="secondary">
+          중복확인
+        </FormButton>
+      </div>
+
+      {dupCheckMessage && (
+        isIdAvailable ? (
+          <SuccessMessage message={dupCheckMessage} />
+        ) : (
+          <ErrorMessage message={dupCheckMessage} />
+        )
+      )}
       
       <FormInput
         type="email"

@@ -1,14 +1,9 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { HomePage } from "../pages/HomePage";
-import { SearchPage } from "../pages/SearchPage";
+import { SearchPage } from "../pages/search";
 import { LoginPage, RegisterPage, PasswordResetPage } from "../pages/user";
-import {
-  CommunityHomePage,
-  RepositoryFeedPage,
-  PostCreatePage,
-  PostDetailPage
-} from "../pages/community";
-
+import { ArticleListPage, ArticleDetailPage } from "../pages/article";
+import { CommunityHomePage, RepositoryFeedPage, PostCreatePage, PostDetailPage } from '../pages/community";
 
 
 const AppRoutes = () => (

@@ -1,8 +1,10 @@
 import axios from 'axios';
 import { useAuthStore } from '../store';
 
+const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8080/api';
+
 const instance = axios.create({
-  baseURL: process.env.REACT_APP_API_URL,
+  baseURL,
   withCredentials: true,
 });
 
