@@ -3,7 +3,7 @@ import { HomePage } from "../pages/HomePage";
 import { SearchPage } from "../pages/search";
 import { LoginPage, RegisterPage, PasswordResetPage } from "../pages/user";
 import { ArticleListPage, ArticleDetailPage } from "../pages/article";
-import { CommunityHomePage, RepositoryFeedPage, PostCreatePage, PostDetailPage } from '../pages/community";
+import { CommunityHomePage, RepositoryFeedPage, PostCreatePage, PostDetailPage } from "../pages/community";
 
 
 const AppRoutes = () => (
