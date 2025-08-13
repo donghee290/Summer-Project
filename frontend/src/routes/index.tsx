@@ -3,6 +3,7 @@ import { HomePage } from "../pages/HomePage";
 import { SearchPage } from "../pages/search";
 import { LoginPage, RegisterPage, PasswordResetPage } from "../pages/user";
 import { ArticleListPage, ArticleDetailPage } from "../pages/article";
+import { CommunityHomePage, RepositoryFeedPage, PostCreatePage, PostDetailPage } from '../pages/community";
 
 
 const AppRoutes = () => (
@@ -13,6 +14,12 @@ const AppRoutes = () => (
       <Route path="/user/login" element={<LoginPage />} />
       <Route path="/user/register" element={<RegisterPage />} />
       <Route path="/user/password-reset" element={<PasswordResetPage />} />
+      
+      {/* 커뮤니티 라우트  */}
+      <Route path="/community" element={<CommunityHomePage />} />
+      <Route path="/community/repository/:repoId" element={<RepositoryFeedPage />} />
+      <Route path="/community/repository/:repoId/new" element={<PostCreatePage />} />
+      <Route path="/community/post/:postId" element={<PostDetailPage />} />
     </Routes>
   </BrowserRouter>
 );
