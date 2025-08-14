@@ -1,0 +1,16 @@
+requests
+beautifulsoup4
+lxml
+python-dotenv
+pandas
+numpy
+tenacity
+openai
+sentence-transformers
+scikit-learn
+hdbscan
+matplotlib
+typing-extensions
+pymysql
+cloud-sql-python-connector[pymysql]
+google-auth
