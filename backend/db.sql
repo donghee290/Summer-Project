@@ -163,3 +163,72 @@ BEGIN
 END$$
 
 DELIMITER ;
+
+ -- 커뮤니티 스키마 (MySQL)
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS=0;
+
+-- 1) 저장소
+CREATE TABLE IF NOT EXISTS repositories (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  description VARCHAR(255) NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 2) 게시글
+CREATE TABLE IF NOT EXISTS posts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_no INT NOT NULL,
+  repository_id INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  content TEXT NOT NULL,
+  image_url VARCHAR(255) NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_posts_user FOREIGN KEY (user_no) REFERENCES User(user_no) ON DELETE CASCADE,
+  CONSTRAINT fk_posts_repo FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 3) 게시글 사진(여러 장)
+CREATE TABLE IF NOT EXISTS post_photos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  post_id INT NOT NULL,
+  image_url VARCHAR(255) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_post_photos_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 4) 게시글 좋아요
+CREATE TABLE IF NOT EXISTS post_likes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_no INT NOT NULL,
+  post_id INT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_user_post (user_no, post_id),
+  CONSTRAINT fk_post_likes_user FOREIGN KEY (user_no) REFERENCES User(user_no) ON DELETE CASCADE,
+  CONSTRAINT fk_post_likes_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 5) 댓글
+CREATE TABLE IF NOT EXISTS comments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_no INT NOT NULL,
+  post_id INT NOT NULL,
+  content TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_comments_user FOREIGN KEY (user_no) REFERENCES User(user_no) ON DELETE CASCADE,
+  CONSTRAINT fk_comments_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 6) 팔로우 (유저-유저)
+CREATE TABLE IF NOT EXISTS follows (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  follower_no INT NOT NULL,
+  followee_no INT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_follow (follower_no, followee_no),
+  CONSTRAINT fk_follows_follower FOREIGN KEY (follower_no) REFERENCES User(user_no) ON DELETE CASCADE,
+  CONSTRAINT fk_follows_followee FOREIGN KEY (followee_no) REFERENCES User(user_no) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET FOREIGN_KEY_CHECKS=1;
