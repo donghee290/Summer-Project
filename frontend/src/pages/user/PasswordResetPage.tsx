@@ -4,6 +4,7 @@ import { resetPassword } from '../../api/user/userApi';
 import { UserForm, FormInput, FormButton, ErrorMessage, SuccessMessage } from '../../components/user';
 
 const PasswordResetPage: React.FC = () => {
+  const [username, setUsername] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
@@ -12,8 +13,8 @@ const PasswordResetPage: React.FC = () => {
   const navigate = useNavigate();
 
   const handleResetPassword = async () => {
-    if (!email) {
-      setError('이메일을 입력해주세요.');
+    if (!username || !email) {
+      setError('아이디와 이메일을 모두 입력해주세요.');
       return;
     }
 
@@ -22,8 +23,8 @@ const PasswordResetPage: React.FC = () => {
     setSuccess('');
 
     try {
-      await resetPassword(email);
-      setSuccess('비밀번호 재설정 이메일이 발송되었습니다.');
+      const { tempPassword } = await resetPassword({ username, email });
+      setSuccess(`비밀번호가 초기화되었습니다. 임시 비밀번호: ${tempPassword}`);
     } catch (err: any) {
       setError(err.response?.data?.message || '비밀번호 재설정에 실패했습니다.');
     } finally {
@@ -37,8 +38,16 @@ const PasswordResetPage: React.FC = () => {
       <SuccessMessage message={success} />
       
       <p style={{ marginBottom: '20px', color: '#666', fontSize: '14px' }}>
-        가입하신 이메일 주소를 입력하시면 비밀번호 재설정 링크를 보내드립니다.
+        아이디와 이메일을 입력하면 비밀번호가 4자리 숫자 임시 비밀번호로 초기화됩니다.
       </p>
+
+      <FormInput
+        type="text"
+        placeholder="아이디를 입력해주세요"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        required
+      />
       
       <FormInput
         type="email"
@@ -48,11 +57,8 @@ const PasswordResetPage: React.FC = () => {
         required
       />
       
-      <FormButton
-        onClick={handleResetPassword}
-        disabled={isLoading}
-      >
-        {isLoading ? '전송 중...' : '비밀번호 재설정 이메일 보내기'}
+      <FormButton onClick={handleResetPassword} disabled={isLoading}>
+        {isLoading ? '처리 중...' : '비밀번호 초기화'}
       </FormButton>
       
       <FormButton

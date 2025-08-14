@@ -1,2 +1,14 @@
 **/node_modules/
 node_modules/
+.env
+*/env
+
+__pycache__/
+*.py[cod]
+
+.venv/
+venv/
+env/
+
+model/results/
+results/

@@ -12,6 +12,7 @@ export const HomePage = () => {
       
       <Button onClick={() => navigate('/user/login')}>로그인</Button>
       <Button onClick={() => navigate('/search')}>검색</Button>
+      <Button onClick={() => navigate('/articles')}>AI 기사 보기</Button>
       <Button onClick={() => alert('홈페이지 버튼 클릭!')}>시작하기</Button>
     </div>
   );

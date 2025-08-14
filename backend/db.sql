@@ -19,55 +19,67 @@ CREATE TABLE User(
 
 
 -- 아티클 테이블
--- PK, 제목, 요약, 본문, 이미지, 분류, 신문사, 원본, 작성자, 작성일, 수정일
--- # TODO
--- 논의 및 확인 필요 (Naver API에서 어떤 값들을 제공하는지 확인해봐야 함)
+-- PK, 제목, 요약, 본문, 이미지, 게시판 분류, 출처, 작성일, 수정일, 좋아요 횟수, 평점 평균, 조회수
 CREATE TABLE Article(
     article_no INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
     article_title VARCHAR(255) NOT NULL,
-    article_summary VARCHAR(500) NULL,
+    article_summary VARCHAR(500) NOT NULL,
     article_content TEXT NOT NULL,
-    article_image BLOB NULL, 
-    article_category VARCHAR(50) NULL,
-    article_press VARCHAR(100) NOT NULL,
-    article_source TEXT NOT NULL, 
-    article_author VARCHAR(100) NULL, 
-    article_reg_at DATETIME NOT NULL, 
-    article_update_at DATETIME NOT NULL
+    article_image_url VARCHAR(500) NULL,
+    article_category VARCHAR(50) NOT NULL,
+    article_reg_at DATETIME NOT NULL,
+    article_update_at DATETIME NULL,
+    article_like_count INT DEFAULT 0,
+    article_rate_avg DECIMAL(2, 1) DEFAULT 0.0,
+    article_view_count INT DEFAULT 0
 );
 
+-- 출처 테이블
+-- 출처 고유번호, 신문사 이름, 원본 링크
+CREATE TABLE Article_Source(
+		source_no INT PRIMARY KEY NOT NULL AUTO_INCREMENT,
+		press_name VARCHAR(100) UNIQUE NOT NULL,
+		source_url TEXT NOT NULL
+);
 
+-- 아티클-출처 매핑 테이블
+-- 아티클 고유번호, 출처 고유번호
+CREATE TABLE Article_Source_Map(
+		article_no INT NOT NULL,
+		source_no INT NOT NULL,
+		PRIMARY KEY (article_no, source_no),
+		FOREIGN KEY (article_no) REFERENCES Article(article_no) ON DELETE CASCADE,
+		FOREIGN KEY (source_no) REFERENCES Article_Source(source_no) ON DELETE CASCADE
+);
 
 -- 북마크 테이블
 -- 사용자 고유번호, 아티클 고유번호
-CREATE TABLE Bookmark(
+CREATE TABLE Article_Bookmark(
     user_no INT NOT NULL,
     article_no INT NOT NULL,
+    is_bookmarked BOOLEAN DEFAULT TRUE,
     PRIMARY KEY (user_no, article_no),
     FOREIGN KEY (user_no) REFERENCES User(user_no) ON DELETE CASCADE,
     FOREIGN KEY (article_no) REFERENCES Article(article_no) ON DELETE CASCADE
 );
-
-
 
 -- 별점 테이블
 -- 사용자 고유번호, 아티클 고유번호, 평점
-CREATE TABLE Rating(
+CREATE TABLE Article_Rate(
     user_no INT NOT NULL,
     article_no INT NOT NULL,
-    rating_score INT NOT NULL,
+    rating_score INT NOT NULL CHECK (rating_score BETWEEN 1 AND 5),
     PRIMARY KEY (user_no, article_no),
     FOREIGN KEY (user_no) REFERENCES User(user_no) ON DELETE CASCADE,
     FOREIGN KEY (article_no) REFERENCES Article(article_no) ON DELETE CASCADE
 );
 
-
-
 -- 좋아요 테이블
 -- 사용자 고유번호, 아티클 고유번호
-CREATE TABLE Likes(
+CREATE TABLE Article_Likes(
     user_no INT NOT NULL,
     article_no INT NOT NULL,
+    is_liked BOOLEAN DEFAULT TRUE,
     PRIMARY KEY (user_no, article_no),
     FOREIGN KEY (user_no) REFERENCES User(user_no) ON DELETE CASCADE,
     FOREIGN KEY (article_no) REFERENCES Article(article_no) ON DELETE CASCADE
@@ -105,20 +117,48 @@ DROP PROCEDURE IF EXISTS WEB_SEARCH_ARTICLES$$
 
 CREATE PROCEDURE WEB_SEARCH_ARTICLES(
     IN p_keyword VARCHAR(255),
+    IN p_category VARCHAR(50),
+    IN p_searchRange VARCHAR(20),
+    IN p_sort VARCHAR(20),
+    IN p_startDate DATETIME,
+    IN p_endDate DATETIME,
     IN p_limit INT,
     IN p_offset INT
 )
 BEGIN
     SELECT 
-        article_no, article_title, article_summary, article_content, article_press, article_reg_at
-    FROM 
-        Article
-    WHERE 
-        article_title LIKE CONCAT('%', p_keyword, '%')
-        OR article_summary LIKE CONCAT('%', p_keyword, '%')
-        OR article_content LIKE CONCAT('%', p_keyword, '%')
-    ORDER BY 
-        article_reg_at DESC
+        article_no,
+        article_title,
+        article_summary,
+        article_content,
+        article_category,
+        article_reg_at,
+        article_like_count,
+        article_rate_avg
+    FROM Article
+    WHERE
+        -- 검색 범위
+        (
+            (p_searchRange = 'title' AND article_title LIKE CONCAT('%', p_keyword, '%'))
+            OR (p_searchRange = 'content' AND article_content LIKE CONCAT('%', p_keyword, '%'))
+            OR (p_searchRange = 'title_content' AND 
+                (article_title LIKE CONCAT('%', p_keyword, '%') 
+                 OR article_content LIKE CONCAT('%', p_keyword, '%')))
+            OR (p_searchRange IS NULL OR p_searchRange = '')
+        )
+        -- 카테고리 필터
+        AND (p_category IS NULL OR p_category = '' OR article_category = p_category)
+        -- 날짜 필터
+        AND (p_startDate IS NULL OR p_endDate IS NULL 
+             OR article_reg_at BETWEEN p_startDate AND p_endDate)
+        -- 정렬
+    ORDER BY
+        CASE 
+            WHEN p_sort = 'latest' THEN article_reg_at
+            WHEN p_sort = 'popular' THEN article_like_count
+            WHEN p_sort = 'rating' THEN article_rate_avg
+            ELSE article_reg_at
+        END DESC
     LIMIT p_limit OFFSET p_offset;
 END$$
 

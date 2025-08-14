@@ -33,12 +33,24 @@ export const login = async (payload: LoginPayload): Promise<LoginResponse> => {
     return response.data;
 };
 
-export const register = async (payload: RegisterPayload): Promise<AuthResponse> => {
-    const response = await axiosInstance.post<AuthResponse>('/user/register', payload);
+export const register = async (payload: RegisterPayload): Promise<{ message: string }> => {
+    const response = await axiosInstance.post<{ message: string }>('/user/register', payload);
     return response.data;
 };
 
-export const resetPassword = async (email: string): Promise<{ message: string }> => {
-    const response = await axiosInstance.post<{ message: string }>('/user/password-reset', { email });
+export const checkDuplicateId = async (username: string): Promise<{ available: boolean }> => {
+    const response = await axiosInstance.get<{ available: boolean }>(`/user/check-id`, {
+        params: { username }
+    });
     return response.data;
-}; 
+};
+
+export const resetPassword = async (
+  payload: { username: string; email: string }
+): Promise<{ message: string; tempPassword: string }> => {
+  const response = await axiosInstance.post<{ message: string; tempPassword: string }>(
+    '/user/password-reset',
+    payload
+  );
+  return response.data;
+};

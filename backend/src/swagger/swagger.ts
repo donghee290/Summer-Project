@@ -1,25 +1,21 @@
 import swaggerJSDoc from 'swagger-jsdoc';
-import fs from 'fs';
-import path from 'path';
-import yaml from 'js-yaml';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as yaml from 'js-yaml';
 
-// 1. 정확한 타입 정의
 interface SwaggerYaml {
   paths?: Record<string, any>;
-  components?: {
-    schemas?: Record<string, any>;
-    [key: string]: any;
-  };
-  [key: string]: any;
+  components?: Record<string, any>;
 }
 
-// 2. YAML 로드
-const searchYamlPath = path.resolve(__dirname, './search.yaml');
-const searchDoc = yaml.load(
-  fs.readFileSync(searchYamlPath, 'utf8')
-) as SwaggerYaml;
+// Load YAML specs from sibling files
+const searchYamlPath = path.resolve(__dirname, 'search.yaml');
+const articleYamlPath = path.resolve(__dirname, 'article.yaml');
 
-// 3. swagger-jsdoc 기본 정의
+const searchDoc = (yaml.load(fs.readFileSync(searchYamlPath, 'utf8')) as SwaggerYaml) || {};
+const articleDoc = (yaml.load(fs.readFileSync(articleYamlPath, 'utf8')) as SwaggerYaml) || {};
+
+// Base spec from JSDoc
 const baseSpec: any = swaggerJSDoc({
   definition: {
     openapi: '3.0.0',
@@ -29,23 +25,24 @@ const baseSpec: any = swaggerJSDoc({
       description: '뉴스 기반 정보형 콘텐츠 서비스',
     },
     servers: [
-      {
-        url: 'http://localhost:8080',
-      },
+      { url: process.env.SWAGGER_SERVER_URL || 'http://localhost:8080' },
     ],
   },
   apis: ['./routes/**/*.ts'],
 });
 
-// 4. 병합
 export const swaggerSpec = {
   ...baseSpec,
   paths: {
     ...(baseSpec.paths || {}),
     ...(searchDoc.paths || {}),
+    ...(articleDoc.paths || {}),
   },
   components: {
     ...(baseSpec.components || {}),
     ...(searchDoc.components || {}),
+    ...(articleDoc.components || {}),
   },
 };
+
+export default swaggerSpec;
