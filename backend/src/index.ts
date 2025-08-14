@@ -7,6 +7,7 @@ import { swaggerSpec} from './swagger/swagger';
 
 import userRouter from "./routes/user/userRouter";
 import searchRouter from "./routes/search/searchRouter";
+import postRouter from './routes/community/postRouter';
 
 dotenv.config();
 
@@ -25,6 +26,10 @@ app.use(express.urlencoded({ extended: true })); // URL 인코딩 파싱
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use("/api/user", userRouter);
 app.use("/api/search", searchRouter);
+
+
+
+app.use('/api/posts', postRouter);
 
 
 app.listen(PORT, () => {
