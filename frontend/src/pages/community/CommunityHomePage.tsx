@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaHeart, FaRegHeart, FaRegComment } from "react-icons/fa";
-import instance from "../../api/axiosInstance"; // axios 기본 설정
-import { PostComposer ,PostDraft } from "../../pages/community/PostComposer"; // 게시글 작성 컴포넌트
+import instance from "../../api/axiosInstance";
+import { PostComposer, PostDraft } from "../../pages/community/PostComposer";
 import axios from "axios";
 
 export async function deletePost(postId: number) {
@@ -24,6 +24,7 @@ interface Post {
   likes: number;
   comments: number;
   liked: boolean;
+  createdAt?: string; // 작성 시간 표시용
 }
 
 export const CommunityHomePage = () => {
@@ -31,9 +32,6 @@ export const CommunityHomePage = () => {
   const [posts, setPosts] = useState<Post[]>([]);
   const [showComposer, setShowComposer] = useState(false);
 
-
-
-  // 📌 모든 게시글 가져오기
   const fetchAllPosts = async () => {
     try {
       const res = await instance.get("/posts");
@@ -43,12 +41,11 @@ export const CommunityHomePage = () => {
     }
   };
 
-  // 📌 게시글 작성
   const createPost = async (draft: PostDraft) => {
     try {
       await instance.post("/posts", draft);
       setShowComposer(false);
-      fetchAllPosts(); // 작성 후 목록 새로고침
+      fetchAllPosts();
     } catch (error) {
       console.error("게시글 작성 실패:", error);
     }
@@ -56,17 +53,15 @@ export const CommunityHomePage = () => {
 
   const handleDelete = async (id: number) => {
     if (!window.confirm("정말 삭제하시겠습니까?")) return;
-  
     try {
       await deletePost(id);
-      setPosts(prev => prev.filter(p => p.id !== id));
+      setPosts((prev) => prev.filter((p) => p.id !== id));
     } catch (err) {
       console.error("삭제 실패", err);
       alert("삭제 실패");
     }
   };
 
-  // 📌 좋아요 토글
   const handleLikeToggle = (postId: number) => {
     setPosts((prev) =>
       prev.map((post) =>
@@ -81,111 +76,104 @@ export const CommunityHomePage = () => {
     );
   };
 
-  // 📌 저장소 클릭 시
-  const handleRepositoryClick = (repositoryId: number) => {
-    navigate(`/community/repository/${repositoryId}`);
-  };
-
-  // 📌 컴포넌트 로드시 데이터 로드
   useEffect(() => {
     fetchAllPosts();
   }, []);
 
   return (
-    <div style={{ padding: "20px" }}>
-      {/* 게시글 작성 버튼 */}
-      <button onClick={() => setShowComposer((prev) => !prev)}>
-        {showComposer ? "작성 취소" : "게시글 작성하기"}
-      </button>
-      
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      {/* 상단 제목 + 버튼 */}
+      <div className="flex justify-between items-center mb-8">
+        <h2 className="text-2xl font-bold">커뮤니티</h2>
+        <button
+          onClick={() => setShowComposer((prev) => !prev)}
+          className="bg-blue-900 text-white px-4 py-2 rounded-md hover:bg-blue-800"
+        >
+          {showComposer ? "작성 취소" : "내 생각 공유하러 가기"}
+        </button>
+      </div>
 
-      {/* 게시글 작성창 */}
       {showComposer && <PostComposer onSubmit={createPost} />}
 
-     
-
       {/* 게시글 목록 */}
-      {posts.map((post) => (
-  <div
-    key={post.id}
-    style={{
-      display: "flex",
-      borderBottom: "1px solid #ccc",
-      padding: "16px 0",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
-    }}
-  >
-    <div style={{ flex: 1 }}>
-      <p
-        style={{ fontSize: "13px", color: "#777", cursor: "pointer" }}
-        onClick={() => handleRepositoryClick(post.repository.id)}
-      >
-        {post.repository.name}
-      </p>
-      <div
-        style={{ cursor: "pointer" }}
-        onClick={() => navigate(`/community/post/${post.id}`)}
-      >
-        <h3 style={{ margin: "6px 0" }}>{post.title}</h3>
-        <p style={{ color: "#555" }}>{post.content}</p>
-        <div style={{ display: "flex", alignItems: "center", marginTop: "8px", gap: "12px" }}>
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              handleLikeToggle(post.id);
-            }}
-            style={{
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-            }}
+      <div className="space-y-6">
+        {posts.map((post) => (
+          <div
+            key={post.id}
+            className="flex justify-between items-start border-b border-gray-200 pb-6"
           >
-            {post.liked ? <FaHeart color="red" /> : <FaRegHeart />} &nbsp;{post.likes}
-          </span>
-          <span style={{ display: "flex", alignItems: "center" }}>
-            <FaRegComment /> &nbsp;{post.comments}
-          </span>
+            {/* 왼쪽 영역 */}
+            <div className="flex flex-1">
+              {/* 프로필 아이콘 */}
+              <div className="w-12 h-12 rounded-full bg-gray-300 mr-4"></div>
 
-          {/* 작성자 + 삭제 버튼 */}
-          <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            {post.author}
-            <button
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "red",
-                cursor: "pointer",
-                fontSize: "12px"
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDelete(post.id);
-              }}
-            >
-              삭제
-            </button>
-          </span>
-        </div>
+              {/* 본문 */}
+              <div className="flex-1">
+                {/* 제목 */}
+                <h4
+                  onClick={() => navigate(`/community/post/${post.id}`)}
+                  className="text-[15px] font-semibold mb-2 cursor-pointer hover:underline"
+                >
+                  {post.title}
+                </h4>
+
+                {/* 내용 */}
+                <p
+                  onClick={() => navigate(`/community/post/${post.id}`)}
+                  className="text-sm text-gray-600 mb-3 leading-relaxed cursor-pointer"
+                >
+                  {post.content.length > 80
+                    ? post.content.slice(0, 80) + "..."
+                    : post.content}
+                </p>
+
+                {/* 하단 정보 */}
+                <div className="flex items-center gap-4 text-sm text-gray-500">
+                  <span className="cursor-pointer hover:underline">
+                    게시글 제목. {post.repository?.name || ""}
+                  </span>
+                  <span>{post.createdAt || "9시간 전"}</span>
+
+                  <span
+                    onClick={() => handleLikeToggle(post.id)}
+                    className="flex items-center gap-1 cursor-pointer"
+                  >
+                    {post.liked ? (
+                      <FaHeart className="text-red-500" />
+                    ) : (
+                      <FaRegHeart />
+                    )}
+                    {post.likes}
+                  </span>
+
+                  <span className="flex items-center gap-1">
+                    <FaRegComment />
+                    {post.comments}
+                  </span>
+
+                  <span>{post.author}</span>
+
+                  <button
+                    onClick={() => handleDelete(post.id)}
+                    className="text-red-500 hover:underline text-xs"
+                  >
+                    삭제
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 오른쪽 썸네일 */}
+            {post.image && (
+              <img
+                src={post.image}
+                alt="게시글 이미지"
+                className="w-32 h-20 ml-5 rounded-xl object-cover"
+              />
+            )}
+          </div>
+        ))}
       </div>
-    </div>
-
-    {post.image && (
-      <img
-        src={post.image}
-        alt="게시글 이미지"
-        style={{
-          width: "80px",
-          height: "80px",
-          marginLeft: "20px",
-          borderRadius: "10px",
-          objectFit: "cover",
-        }}
-      />
-    )}
-  </div>
-))}
-
     </div>
   );
 };
