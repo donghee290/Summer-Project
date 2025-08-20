@@ -1,67 +1,74 @@
+import os
+import sys
 from pathlib import Path
-import pandas as pd
-import re
+import importlib
 
-ROOT = Path(__file__).resolve().parents[1]
-gen_dir = ROOT / "results" / "generate_results"
-clu_dir = ROOT / "results" / "cluster_results"
+HERE = Path(__file__).resolve()
+PROJECT_ROOT = HERE.parents[1]
 
-req_files = [
-    gen_dir / "cluster_articles_for_db.csv",
-    gen_dir / "article_sources_unique.csv",
-    gen_dir / "article_sources_staging.csv",
-    clu_dir / "clustering_results_detailed.csv",
-]
-missing_fs = [str(p) for p in req_files if not p.exists()]
-if missing_fs:
-    raise FileNotFoundError("누락된 파일:\n" + "\n".join(missing_fs))
+MAIN_PIPE_DIR = PROJECT_ROOT / "model" / "main_pipeline"
+TEST_PIPE_DIR = PROJECT_ROOT / "model" / "test_pipeline"
 
-arts = pd.read_csv(req_files[0])
-uniq = pd.read_csv(req_files[1])
-stg  = pd.read_csv(req_files[2])
-src  = pd.read_csv(req_files[3])
+# Choose which pipeline to use:
+# - If env USE_TEST_PIPELINE == "1", prefer test_pipeline (when it exists)
+# - Else fall back to main_pipeline
+use_test = os.getenv("USE_TEST_PIPELINE", "1") == "1"
+PIPE_DIR = TEST_PIPE_DIR if (use_test and TEST_PIPE_DIR.exists()) else MAIN_PIPE_DIR
 
-# 1) 필수 컬럼
-required = {"article_title","article_summary","article_content","article_category",
-            "article_reg_at","cluster","used_indices","source_urls"}
-missing = required - set(arts.columns)
-print("missing cols:", missing)
+# Show which pipeline is used
+print(f"[Init] Using pipeline directory: {PIPE_DIR}")
 
-# 2) 길이/문장 수
-def sentence_count(s: str) -> int:
-    parts = re.split(r'(?<=[\.!?])\s+', str(s).strip())
-    parts = [p for p in parts if p]
-    return len(parts)
+# Ensure import path
+if str(PIPE_DIR) not in sys.path:
+    sys.path.insert(0, str(PIPE_DIR))
 
-print("title_len_ok:", (arts.article_title.fillna("").str.len()<=60).all())
-print("summary_len_ok:", (arts.article_summary.fillna("").str.len()<=300).all())
-print("summary_3sent_ok:", (arts.article_summary.fillna("").map(sentence_count)==3).all())
-print("body_len_ok:", (arts.article_content.fillna("").str.len()<=1300).all())
 
-# 3) 카테고리
-valid_cats = {"국내경제","해외경제","사회","트렌드"}
-print("category_ok:", arts.article_category.isin(valid_cats).all())
+def run_collector():
+    mod = importlib.import_module("news_collector")
+    print("\n[1/4] 뉴스 수집 시작")
+    mod.main()
+    print("[1/4] 뉴스 수집 완료")
 
-# 4) 행 수 = 클러스터 수
-n_arts = len(arts)
-n_clusters = src["cluster"].nunique()
-print("rows == n_clusters ?", n_arts, n_clusters, n_arts==n_clusters)
+def run_cluster():
+    mod = importlib.import_module("news_cluster")
+    print("\n[2/4] 임베딩 + 군집화 시작")
+    mod.main()
+    print("[2/4] 임베딩 + 군집화 완료")
 
-# 5) 소스 매핑 일관성
-ok_tmp_range = stg["article_tmp_id"].between(1, n_arts).all()
-print("staging tmp_id in range:", ok_tmp_range)
+def run_generator():
+    mod = importlib.import_module("articles_generator")
+    print("\n[3/4] GPT 요약 생성 시작")
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY가 없어 요약 단계를 진행할 수 없습니다.")
+    mod.main()
+    print("[3/4] GPT 요약 생성 완료")
 
-has_press = (uniq["press_name"].fillna("") != "")
-has_url   = (uniq["source_url"].fillna("") != "")
-print("unique sources non-empty:", (has_press | has_url).any())
+def run_db_save():
+    mod = importlib.import_module("database_saver")
+    print("\n[4/4] DB 저장 시작 (MySQL / Cloud SQL)")
+    mode = "Cloud SQL Connector" if os.getenv("INSTANCE_CONNECTION_NAME") else "PyMySQL direct/proxy"
+    print(f" - 연결 모드: {mode}")
+    if not os.getenv("INSTANCE_CONNECTION_NAME"):
+        required = ["DB_HOST", "DB_PORT", "DB_USER", "DB_NAME"]
+        missing = [k for k in required if not os.getenv(k)]
+        if missing:
+            print(f"   경고: 환경변수 누락 {missing} → .env 또는 환경변수로 설정하세요.")
+    mod.main()
+    print("[4/4] DB 저장 완료")
 
-bad_rows = uniq[~(has_press & has_url)]
-print("rows with missing press or url:", len(bad_rows))
-if len(bad_rows):
-    print(bad_rows.head(10))
+def main():
+    results_dir = PROJECT_ROOT / "model" / "results"
+    for sub in ("collect_results", "cluster_results", "generate_results"):
+        (results_dir / sub).mkdir(parents=True, exist_ok=True)
 
-# 요약 3문장 아닌 행 샘플
-bad = arts[arts["article_summary"].fillna("").map(sentence_count) != 3]
-print("not 3 sentences rows:", len(bad))
-if len(bad):
-    print(bad[["article_title","article_summary"]].head(5))
+    try:
+        run_collector()
+        run_cluster()
+        run_generator()
+        run_db_save()
+    except Exception as e:
+        print(f"\n❌ 파이프라인 실패: {type(e).__name__}: {e}")
+        raise
+
+if __name__ == "__main__":
+    main()
