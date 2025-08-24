@@ -42,10 +42,10 @@ class KoSimCSENewsPipeline:
             'max_text_length': 1000,
             'clustering_methods': ['HDBSCAN', 'K-Means', 'DBSCAN'],
             'hdbscan_params': {
-                'min_cluster_size': 20,
+                'min_cluster_size': 12,
                 'min_samples': 8,
-                'metric': 'cosine',
-                'cluster_selection_epsilon': 0.25
+                'metric': 'euclidean',
+                'cluster_selection_epsilon': 0.0
             },
             'kmeans_params': {
                 'n_init': 20,
@@ -138,14 +138,31 @@ class KoSimCSENewsPipeline:
             print("❌ 모델 또는 뉴스 데이터가 준비되지 않았습니다.")
             return False
         try:
-            texts = self.articles_df['fullText'].tolist()
-            self.embeddings = self.model.encode(
-                texts,
+            TITLE_WEIGHT = 2.5
+
+            titles = self.articles_df['title'].fillna('').tolist()
+            bodies = self.articles_df['content'].fillna('').map(lambda s: s[:600]).tolist()
+
+            E_t = self.model.encode(
+                titles,
                 batch_size=self.config['batch_size'],
                 show_progress_bar=True,
                 convert_to_numpy=True,
                 normalize_embeddings=True
             )
+            E_b = self.model.encode(
+                bodies,
+                batch_size=self.config['batch_size'],
+                show_progress_bar=True,
+                convert_to_numpy=True,
+                normalize_embeddings=True
+            )
+
+            emb = (TITLE_WEIGHT * E_t + E_b) / (TITLE_WEIGHT + 1.0)
+            # L2 재정규화
+            emb = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-12)
+
+            self.embeddings = emb
             print(f"✅ 임베딩 생성 완료! 형태: {self.embeddings.shape}")
             return True
         except Exception as e:
@@ -180,14 +197,34 @@ class KoSimCSENewsPipeline:
         if 'K-Means' in self.config['clustering_methods']:
             print("2. K-Means 클러스터링...")
             try:
-                n_categories = len(self.articles_df['category'].unique())
-                optimal_k = min(n_categories + 2, 15)
-                kmeans = KMeans(n_clusters=optimal_k, **self.config['kmeans_params'])
-                labels = kmeans.fit_predict(self.embeddings)
-                results['K-Means'] = labels
-                score = silhouette_score(self.embeddings, labels)
-                scores['K-Means'] = score
-                print(f"   ✅ 완료: {optimal_k}개 클러스터, 실루엣 {score:.3f}")
+                n = len(self.embeddings)
+                k_min = max(4, int(np.sqrt(n)))           # 데이터 크기 기반 하한
+                k_max = min(24, max(6, int(np.sqrt(n)*2)))# 상한
+                best_k, best_score, best_labels = None, -1, None
+
+                for k in range(k_min, k_max + 1):
+                    if k >= n:
+                        break
+                    km = KMeans(n_clusters=k, **self.config['kmeans_params'])
+                    lbl = km.fit_predict(self.embeddings)
+                    # 실루엣은 군집 2개 이상일 때만 유효
+                    if len(set(lbl)) < 2:
+                        continue
+                    sc = silhouette_score(self.embeddings, lbl)
+                    if sc > best_score:
+                        best_k, best_score, best_labels = k, sc, lbl
+
+                if best_labels is None:
+                    # 안전망: 기존 방식으로라도 한 번 계산
+                    fallback_k = min(15, max(2, k_min))
+                    km = KMeans(n_clusters=fallback_k, **self.config['kmeans_params'])
+                    best_labels = km.fit_predict(self.embeddings)
+                    best_k, best_score = fallback_k, silhouette_score(self.embeddings, best_labels) if len(set(best_labels))>1 else -1
+
+                results['K-Means'] = best_labels
+                scores['K-Means'] = best_score
+                print(f"   ✅ 완료: {best_k}개 클러스터, 실루엣 {best_score:.3f}")
+
             except Exception as e:
                 print(f"   ❌ K-Means 실패: {e}")
 
@@ -210,6 +247,7 @@ class KoSimCSENewsPipeline:
         if scores:
             self.best_method = max(scores, key=scores.get)
             self.cluster_labels = results[self.best_method]
+            self.cluster_labels = self._postprocess_labels(self.cluster_labels, split_threshold=0.38, min_size=8)
             print(f"\n🎯 최적 방법: {self.best_method} (실루엣 계수: {scores[self.best_method]:.3f})")
         elif results:
             if 'HDBSCAN' in results:
@@ -218,6 +256,7 @@ class KoSimCSENewsPipeline:
             else:
                 self.best_method = list(results.keys())[0]
                 self.cluster_labels = results[self.best_method]
+            self.cluster_labels = self._postprocess_labels(self.cluster_labels, split_threshold=0.38, min_size=8)
             print(f"\n🎯 선택된 방법: {self.best_method}")
 
         return results
@@ -298,6 +337,48 @@ class KoSimCSENewsPipeline:
                 print(f"  노이즈 비율: {metrics['noise_ratio']:.1%}")
         return metrics
     
+    def _postprocess_labels(self, labels, split_threshold=0.38, min_size=8):
+        labels = labels.copy()
+        if len(labels) == 0:
+            return labels
+
+        # 군집 내부 중앙 유사도가 낮으면 2-way 분할
+        for cid in sorted(set(labels)):
+            if cid == -1:
+                continue
+            idx = np.where(labels == cid)[0]
+            if len(idx) < min_size:
+                continue
+            V = self.embeddings[idx]
+            sim = V @ V.T  # 정규화 임베딩 → 코사인 유사도
+            tri = sim[np.triu_indices(len(idx), 1)]
+            med = float(np.median(tri))
+            if med < split_threshold:
+                km = KMeans(n_clusters=2, random_state=42, n_init=10).fit(V)
+                sub = km.labels_
+                # 새 라벨 할당(최댓값 다음부터)
+                base = np.max(labels) if np.max(labels) >= 0 else -1
+                a_lbl, b_lbl = base + 1, base + 2
+                for j, s in enumerate(sub):
+                    labels[idx[j]] = a_lbl if s == 0 else b_lbl
+
+        # 각 포인트가 자기 군집 중심과 너무 멀면 노이즈(-1)로 전환
+        for i in range(len(labels)):
+            if labels[i] == -1:
+                continue
+            cid = labels[i]
+            members = np.where(labels == cid)[0]
+            if len(members) < 3:
+                continue
+            center = self.embeddings[members].mean(axis=0)
+            center = center / (np.linalg.norm(center) + 1e-12)
+            cos = float(np.dot(self.embeddings[i], center))
+            if cos < 0.20:
+                labels[i] = -1
+
+        return labels
+
+    
     def save_results(self):
         print(f"\n💾 결과 저장 중...")
         if self.articles_df is None or self.cluster_labels is None:
@@ -307,6 +388,28 @@ class KoSimCSENewsPipeline:
             results_df = self.articles_df.copy()
             results_df['cluster'] = self.cluster_labels
             results_df['method'] = self.best_method
+
+            # 1) 군집별 원 카테고리 다수결 (economy/society/entertainment 중 하나)
+            maj_raw = results_df.groupby("cluster")["category"].agg(lambda s: s.value_counts().idxmax())
+            results_df = results_df.merge(maj_raw.rename("cluster_majority_raw"),
+                                        left_on="cluster", right_index=True, how="left")
+
+            # 2) 한글 4종으로 보조 매핑 (economy는 텍스트로 국내/해외 분기)
+            GLOBAL_HINTS = ["미국","중국","일본","유럽","EU","글로벌","세계","월가","연준","Fed","ECB","BOJ",
+                            "해외","국제","달러","엔","유로","위안","수입","수출","환율"]
+
+            def _raw_to_ko(raw, text):
+                raw = (raw or "").lower()
+                if raw == "society": return "사회"
+                if raw == "entertainment": return "트렌드"
+                if raw == "economy":
+                    t = (text or "")
+                    return "해외경제" if any(k.lower() in t.lower() for k in GLOBAL_HINTS) else "국내경제"
+                return None
+
+            results_df["cluster_majority_ko"] = results_df.apply(
+                lambda r: _raw_to_ko(r.get("cluster_majority_raw"), r.get("fullText") or r.get("content") or ""), axis=1
+            )
             
             ts = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
             csv_path = self.output_dir / f'clustering_results_detailed_{ts}.csv'
@@ -357,7 +460,7 @@ class KoSimCSENewsPipeline:
 
 def main():
     NEWS_DIR = Path(__file__).resolve().parents[2] / "model" / "results" / "collect_results"
-    latest = max(NEWS_DIR.glob("news_colletced_*h_*.json"), key=lambda p: p.stat().st_mtime)
+    latest = max(NEWS_DIR.glob("news_collected_*h_*.json"), key=lambda p: p.stat().st_mtime)
     news_file_path = str(latest)
     print("Using:", news_file_path)
 
