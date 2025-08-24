@@ -1,4 +1,4 @@
-import os, json, time, random, re
+import os, json, time, random, re, base64, hashlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
@@ -9,11 +9,11 @@ import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from openai import OpenAI
 
-# 입력/출력 경로
 HERE = Path(__file__).resolve()
 PROJECT_ROOT = HERE.parents[2]
 IN_BASE  = PROJECT_ROOT / "model" / "results" / "cluster_results"
 OUT_BASE = PROJECT_ROOT / "model" / "results" / "generate_results"
+OUT_BASE.mkdir(parents=True, exist_ok=True)
 
 def _latest_cluster_csv() -> str:
     files = sorted(
@@ -23,11 +23,12 @@ def _latest_cluster_csv() -> str:
     )
     return str(files[0]) if files else str(IN_BASE / "clustering_results_detailed.csv")
 
-INPUT_CSV = os.getenv("INPUT_CSV", _latest_cluster_csv())
+INPUT_CSV = _latest_cluster_csv()
 
-OUT_CLUSTER_CSV     = os.getenv("OUT_CLUSTER_CSV",     str(OUT_BASE / "cluster_articles_for_db.csv"))
-OUT_SRC_UNIQ_CSV    = os.getenv("OUT_SRC_UNIQ_CSV",    str(OUT_BASE / "article_sources_unique.csv"))
-OUT_SRC_STAGING_CSV = os.getenv("OUT_SRC_STAGING_CSV", str(OUT_BASE / "article_sources_staging.csv"))
+IMG_DIR = OUT_BASE / "images"
+IMG_DIR.mkdir(parents=True, exist_ok=True)
+
+PUBLIC_MEDIA_ROUTE = "/media"
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -37,24 +38,37 @@ if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY가 설정되어 있지 않습니다. .env 또는 환경변수를 확인하세요.")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# 생성 길이 제한
-TITLE_MAX_CHARS   = int(os.getenv("TITLE_MAX_CHARS",   "60"))
-SUMMARY_MAX_CHARS = int(os.getenv("SUMMARY_MAX_CHARS", "300"))
-REWRITE_MAX_CHARS = int(os.getenv("REWRITE_MAX_CHARS", "1300"))
+TITLE_MAX_CHARS   = 60
+SUMMARY_MAX_CHARS = 300
+REWRITE_MAX_CHARS = 1300
 
-# 컨텍스트 문서 수, 노이즈 컷오프
-MAX_ARTICLES_PER_CLUSTER = int(os.getenv("MAX_ARTICLES_PER_CLUSTER", "5"))
-MIN_BODY_CHARS = int(os.getenv("MIN_BODY_CHARS", "200"))
-SLEEP_BETWEEN_CALLS = float(os.getenv("SLEEP_BETWEEN_CALLS", "0.4"))
+ENABLE_IMAGE_GEN = True
+IMAGE_MODEL  = "dall-e-3"
+IMAGE_SIZE   = "1792x1024"
+IMAGE_FORMAT = "png"
 
-# 카테고리 4종
+MAX_ARTICLES_PER_CLUSTER = 5
+MIN_BODY_CHARS = 200
+SLEEP_BETWEEN_CALLS = 0.4
+
 CATS = {"국내경제","해외경제","사회","트렌드"}
+
+RAW2KO_BASE = {
+    "society": "사회",
+    "entertainment": "트렌드",
+}
+GLOBAL_HINTS = [
+    "미국","중국","일본","유럽","EU","글로벌","세계","월가","연준","Fed","ECB","BOJ",
+    "해외","국제","달러","엔","유로","위안","수입","수출","환율"
+]
 
 SYSTEM_PROMPT = (
     "당신은 한국어 뉴스 다문서 요약 어시스턴트입니다. "
     "20~30대도 빠르게 이해하도록 쉬운 문장, 핵심 위주, 과장/추측 금지. "
     "날짜·수치·기관명 등 사실 정보는 보존하고, 상충 시 출처에 근거해 신중하게 기술합니다. "
-    "출력은 반드시 JSON 하나만 반환하세요."
+    "출력은 반드시 JSON 하나만 반환하세요. "
+    "스타일 규칙: 재가공 본문은 반드시 경어체(합니다/입니다)로만 작성. "
+    "재가공 본문에서 평서형 '-다/했다/이다/한다' 금지."
 )
 
 USER_PROMPT_TMPL = """다음은 같은 군집의 여러 기사입니다. 이들을 하나의 아티클로 통합하세요.
@@ -67,9 +81,15 @@ USER_PROMPT_TMPL = """다음은 같은 군집의 여러 기사입니다. 이들�
 
 요구사항:
 1) 제목: 핵심을 압축, {title_max}자 이내
-2) 요약문: 정확히 3문장, 팩트 위주, {summary_max}자 이내, 개조식 단어체 사용
-3) 재가공 본문: 배경→핵심 사실→의미/쟁점 순 기사체, {rewrite_max}자 이내, 경어체 사용
-4) 중복/광고/댓글 흔적 제거, 불확실 정보는 단정 금지
+2) 요약문: 정확히 3개 ‘개조식’ 조항으로 작성, 전체 {summary_max}자 이내
+   - 개조식/명사형(체언절) 말투로 통일(예: “~ 발표”, “~ 확대”, “~ 하락”)
+   - 서술형 어미(“~다/~요/~습니다” 등) 금지, 감탄/의문 금지
+   - 각 조항 끝에 마침표/느낌표/물음표 사용 금지
+   - 세 조항은 한 줄 문자열로, ‘ · ’(앞뒤 공백 포함)로 구분하여 반환
+3) 재가공 본문: 배경→핵심 사실→의미/쟁점 순 기사체, {rewrite_max}자 이내,
+   - **경어체(합니다/입니다)만 사용**, 평서형 '-다/했다/이다/한다' 일절 금지
+   - 군더더기 수식 최소화, 문장 호흡 짧게(가독성 우선)
+4) 중복/광고/댓글 흔적 제거, 불확실 정보 단정 금지
 5) 20~30대도 이해하기 쉽게, 전문용어는 짧게 풀어 설명
 6) 서로 유사한 내용의 기사만을 하나의 아티클로 다룰 것
 
@@ -137,16 +157,32 @@ def build_items(df_sel: pd.DataFrame) -> Tuple[str, str, List[int], List[str], L
 
     return json.dumps(metas, ensure_ascii=False), "\n".join(bodies), indices, urls, titles, sources
 
-def normalize_category(raw_cat: str, title: str, body: str) -> str:
-    raw = (raw_cat or "").strip()
-    if raw in CATS:
-        return raw
-    t = f"{title} {body}".lower()
+def normalize_category(raw_cat: str, title: str, body: str,
+                       cluster_majority_raw: str = None,
+                       cluster_majority_ko: str = None) -> str:
+    """
+    1) 클러스터 다수결(있다면) 우선
+    2) 영문 원 카테고리 → 한글 4종 매핑
+    3) economy는 본문/제목에 해외 힌트가 있으면 '해외경제', 아니면 '국내경제'
+    4) 그래도 못 정하면 기존 규칙 기반으로 백업
+    """
+    txt = f"{title} {body}"
+    # 1) 클러스터 다수결 먼저
+    if cluster_majority_ko in {"국내경제","해외경제","사회","트렌드"}:
+        return cluster_majority_ko
 
-    # 간단 규칙 기반 매핑
+    raw = (raw_cat or "").strip().lower()
+    if raw in RAW2KO_BASE:
+        return RAW2KO_BASE[raw]
+    if raw == "economy":
+        if any(k.lower() in txt.lower() for k in GLOBAL_HINTS):
+            return "해외경제"
+        return "국내경제"
+
+    # ---- 이하: 기존 규칙 기반 백업 ----
+    t = txt.lower()
     if any(k in t for k in ["수출","환율","금리","경기","주가","증시","기업","채권","물가","부동산","고용"]):
-        # 국내 vs 해외 힌트
-        if any(k in t for k in ["미국","중국","일본","eu","유럽","세계","글로벌","월가","fed","boj","ecb"]):
+        if any(k.lower() in t for k in GLOBAL_HINTS):
             return "해외경제"
         return "국내경제"
     if any(k in t for k in ["범죄","사건","사고","경찰","검찰","재판","복지","교육청","지자체","주거","임대","저소득"]):
@@ -208,6 +244,140 @@ def call_llm(user_prompt: str) -> Dict[str, Any]:
     )
     return json.loads(resp.choices[0].message.content)
 
+def build_image_prompt(title: str, body: str, category: str) -> str:
+    """뉴스 썸네일용 포토리얼 프롬프트(장면/구도/조명 가변화)"""
+    # ---- 키워드 얕은 추출 ----
+    key_candidates = []
+    for k in ["수출","환율","금리","경기","주가","증시","기업","채권","물가","부동산","고용",
+              "미국","중국","일본","유럽","정책","예산","복지","교육","사건","사고","데이터센터",
+              "AI","스마트시티","기후","탄소","에너지","의료","감염병"]:
+        if k in title or k in body:
+            key_candidates.append(k)
+    keys = ", ".join(sorted(set(key_candidates))[:5]) or "뉴스 핵심 주제"
+
+    # ---- 가변 선택을 위한 시드(같은 기사 → 같은 결과, 다른 기사 → 다양성) ----
+    seed = int(hashlib.md5(f"{title}|{category}".encode("utf-8")).hexdigest()[:8], 16)
+    rnd = random.Random(seed)
+
+    # ---- 카테고리별 '모티프 풀'(넓은 개념의 장면들) ----
+    motif_pool = {
+        "국내경제": [
+            "도심 금융가/업무지구 전경(비식별 인물 소수, 배경 보케)",
+            "사무실 책상 위 재무 자료와 계산기(로고/문자 식별 불가)",
+            "고층 빌딩 유리 외벽에 비친 도시 풍경(추상적 반사)",
+            "제조 현장의 도구·계기판 클로즈업(브랜드/텍스트 없이)",
+            "대중교통 출근 인파의 원거리 샷(얼굴 식별 불가)"
+        ],
+        "해외경제": [
+            "항만 컨테이너/크레인 원거리 샷(로고 제거/추상화)",
+            "국제 도시 스카이라인과 고가도로의 야간 트래픽 라이트",
+            "글로벌 지도 프로젝션 앞 실루엣(사람은 비식별)",
+            "컨테이너선 갑판의 구조물 디테일(텍스트/로고 없음)",
+            "추상화된 통화/지표 패턴을 배경으로 한 도시 전경"
+        ],
+        "사회": [
+            "법원·행정기관 건물의 외관/계단(사람은 원거리·뒷모습)",
+            "지하철역 플랫폼/출구의 생활 장면(비식별 보행자)",
+            "학교 복도/교실 빈 책상 등 공공장소 디테일",
+            "횡단보도/교차로 상공샷(군중은 작고 식별 불가)",
+            "비 오는 거리의 우산과 보행자 실루엣(익명성 유지)"
+        ],
+        "트렌드": [
+            "카페/코워킹스페이스의 테이블 셋업(노트북·기기·소품 위주)",
+            "도시 풍경과 함께 보이는 네온/간접조명 실내 장면",
+            "모던 인테리어 공간의 제품·소품 클로즈업(브랜드 제거)",
+            "데이터센터/서버룸의 복도(로고/식별 텍스트 없음)",
+            "야외 스트리트 패션/라이프스타일 실루엣(얼굴 비식별)"
+        ]
+    }
+    scene = rnd.choice(motif_pool.get(category, motif_pool["트렌드"]))
+
+    # ---- 추가로 구도/렌즈/조명도 가변화 ----
+    compositions = [
+        "로우앵글", "아이레벨", "하이앵글", "대칭 구도", "삼분할 구도", "오버헤드 탑뷰"
+    ]
+    lenses = ["35mm", "50mm", "85mm"]
+    lights = ["자연광", "실내 확산광", "역광 실루엣", "황금시간대(노을빛)", "흐린날 소프트광"]
+
+    comp  = rnd.choice(compositions)
+    lens  = rnd.choice(lenses)
+    light = rnd.choice(lights)
+
+    # ---- 최종 프롬프트(일러스트 금지, 포토리얼 고정) ----
+    return (
+        f"[한국어 지시] 다음 주제의 **뉴스 썸네일**을 '실사 사진'처럼 생성하세요.\n"
+        f"- 주제(핵심 키워드): {keys}\n"
+        f"- 장면 모티프(예시 중 1개 선택해 구체화): {scene}\n"
+        f"- 촬영 지시: {comp} 구도, {lens} 렌즈 느낌, {light}, 얕은 피사계심도(배경 약간 아웃포커스), 약한 필름 그레인.\n"
+        f"- 금지: 일러스트/벡터/카툰/3D 렌더/아이콘/인포그래픽, 화면 내 텍스트, 브랜드 로고·상표, "
+        f"특정 정치인/연예인 등 실존 인물의 식별 가능한 얼굴.\n"
+        f"- 인물은 있더라도 등/옆모습 또는 원거리로 비식별 처리.\n"
+        f"- 결과물은 일반 뉴스 포털 카드형 썸네일에 적합해야 하며, 실사 사진처럼 보일 것."
+    )
+
+def generate_article_image(title: str, body: str, category: str, cluster_id: int) -> str:
+    """DALL·E 3로 이미지 생성 → 파일 저장 → 프로젝트 상대경로 문자열 리턴.
+       실패/비활성화 시 빈 문자열 리턴."""
+    if not ENABLE_IMAGE_GEN:
+        return ""
+    try:
+        prompt = build_image_prompt(title, body, category)
+        resp = client.images.generate(
+            model=IMAGE_MODEL,
+            prompt=prompt,
+            size=IMAGE_SIZE,
+            response_format="b64_json",   # 파일 저장에 유리
+        )
+        b64 = resp.data[0].b64_json
+        raw = base64.b64decode(b64)
+        fname = f"article_{cluster_id}_{int(time.time())}.{IMAGE_FORMAT}"
+        fpath = IMG_DIR / fname
+        with open(fpath, "wb") as f:
+            f.write(raw)
+
+        return f"{PUBLIC_MEDIA_ROUTE}/{fname}"
+    except Exception:
+        return ""
+    
+def enforce_bullet_style(text: str) -> str:
+    """
+    요약을 개조식 3개 조항으로 정리.
+    - 조항 구분: ' · '
+    - 조항 끝의 마침표/감탄/의문 제거
+    - 서술형 어미(~다/~요/~습니다 등) 단순 제거 시도
+    """
+    if not text:
+        return ""
+
+    # 1) 조항 후보 분리: 줄바꿈/세미콜론/가운뎃점/점 등
+    parts = re.split(r'(?:\n+|[;•·・ㆍ]|(?<=[\.!?])\s+)', text)
+    parts = [p.strip() for p in parts if p and p.strip()]
+
+    # 2) 각 조항 후처리
+    cleaned = []
+    for s in parts:
+        # 끝 구두점 제거
+        s = re.sub(r'[\s\.!?…]+$', '', s)
+
+        # 매우 흔한 서술형 어미 제거(과도한 변형은 피하고 단순 컷)
+        s = re.sub(r'(?:습니다|하였다|했다|된다|됐다|한다|이다|였다|다|요)$', '', s)
+
+        # 앞뒤 공백 정리
+        s = s.strip()
+
+        # 너무 짧으면 스킵
+        if len(s) < 2:
+            continue
+
+        cleaned.append(s)
+        if len(cleaned) == 3:
+            break
+
+    # 3) 3개 미만이면 있는 만큼만 반환
+    out = " · ".join(cleaned)
+    return clamp(out, SUMMARY_MAX_CHARS)
+    
+
 def main():
     assert Path(INPUT_CSV).exists(), f"입력 CSV 없음: {INPUT_CSV}"
     df = pd.read_csv(INPUT_CSV)
@@ -247,26 +417,34 @@ def main():
             items_bodies=(items_bodies[:3500]),
             title_max=TITLE_MAX_CHARS,
             summary_max=SUMMARY_MAX_CHARS,
-            rewrite_max=REWRITE_MAX_CHARS,
+            rewrite_max=REWRITE_MAX_CHARS
         )
 
         try:
             out = call_llm(user_prompt)
             gen_title   = clamp(out.get("title",""), TITLE_MAX_CHARS)
-            gen_summary = ensure_3_sentences(out.get("summary",""))
+            gen_summary = enforce_bullet_style(out.get("summary",""))
             gen_rewrite = clamp(out.get("rewritten_body",""), REWRITE_MAX_CHARS)
         except Exception:
             # 폴백: 대표 문서 기반
             gen_title   = clamp(rep.get("title",""), TITLE_MAX_CHARS)
             base = rep.get("__body") or rep.get("content") or rep.get("description") or ""
-            gen_summary = ensure_3_sentences(base[:SUMMARY_MAX_CHARS])
+            gen_summary = enforce_bullet_style(base[:SUMMARY_MAX_CHARS])
             gen_rewrite = clamp(base, REWRITE_MAX_CHARS)
 
-        # 카테고리 정규화(4종으로 강제)
-        norm_cat = normalize_category(rep.get("category"), gen_title, gen_rewrite)
+        # 카테고리 정규화
+        norm_cat = normalize_category(
+            rep.get("category"),
+            gen_title,
+            gen_rewrite,
+            rep.get("cluster_majority_raw"),
+            rep.get("cluster_majority_ko"),
+        )
 
         # 기사 등록 시각(KST)
         reg_at = now_kst_iso()
+
+        image_url = generate_article_image(gen_title, gen_rewrite, norm_cat, int(cluster_id))
 
         # DB 컬럼과 매핑되는 결과 행(Article 테이블용)
         # article_image_url은 현재 수집 스키마에 없으므로 빈 값
@@ -274,7 +452,7 @@ def main():
             "article_title": gen_title,
             "article_summary": gen_summary,
             "article_content": gen_rewrite,
-            "article_image_url": "",
+            "article_image_url": image_url,
             "article_category": norm_cat,
             "article_reg_at": reg_at,
             "article_update_at": "",
@@ -320,9 +498,9 @@ def main():
     staging_csv = OUT_BASE / f"article_sources_staging_{ts}.csv"
     out_src_staging.to_csv(staging_csv, index=False, encoding="utf-8-sig")
 
-    print(f"완료: {OUT_CLUSTER_CSV} ({len(out_articles)} rows)")
-    print(f"완료: {OUT_SRC_UNIQ_CSV} ({len(out_src_unique)} unique sources)")
-    print(f"완료: {OUT_SRC_STAGING_CSV} ({len(out_src_staging)} mappings)")
+    print(f"완료: {cluster_csv} ({len(out_articles)} rows)")
+    print(f"완료: {uniq_csv} ({len(out_src_unique)} unique sources)")
+    print(f"완료: {staging_csv} ({len(out_src_staging)} mappings)")
     
 if __name__ == "__main__":
     main()

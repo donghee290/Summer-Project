@@ -1,14 +1,11 @@
 import os
-import math
 import pandas as pd
 from pathlib import Path
-from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 import pymysql
 from dotenv import load_dotenv, find_dotenv
 
-# ---- .env 로드 ----
 load_dotenv(find_dotenv(), override=True)
 
 HERE = Path(__file__).resolve()
