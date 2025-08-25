@@ -3,28 +3,18 @@ import { useNavigate } from "react-router-dom";
 import { FaHeart, FaRegHeart, FaRegComment } from "react-icons/fa";
 import instance from "../../api/axiosInstance";
 import { PostComposer, PostDraft } from "../../pages/community/PostComposer";
-import axios from "axios";
-
-export async function deletePost(postId: number) {
-  await axios.delete(`http://localhost:8080/api/posts/${postId}`, {
-    withCredentials: true,
-  });
-}
+import dayjs from "../../utils/dayjsConfig"; // ✅ 공통 dayjs 사용
 
 interface Post {
   id: number;
   title: string;
   content: string;
-  repository: {
-    id: number;
-    name: string;
-  };
-  image: string | null;
+  image_url: string | null;
   author: string;
   likes: number;
   comments: number;
   liked: boolean;
-  createdAt?: string; // 작성 시간 표시용
+  created_at: string;
 }
 
 export const CommunityHomePage = () => {
@@ -43,7 +33,11 @@ export const CommunityHomePage = () => {
 
   const createPost = async (draft: PostDraft) => {
     try {
-      await instance.post("/posts", draft);
+      await instance.post("/posts", {
+        title: draft.title,
+        content: draft.content,
+        image_url: draft.image_url,
+      });
       setShowComposer(false);
       fetchAllPosts();
     } catch (error) {
@@ -54,7 +48,7 @@ export const CommunityHomePage = () => {
   const handleDelete = async (id: number) => {
     if (!window.confirm("정말 삭제하시겠습니까?")) return;
     try {
-      await deletePost(id);
+      await instance.delete(`/posts/${id}`);
       setPosts((prev) => prev.filter((p) => p.id !== id));
     } catch (err) {
       console.error("삭제 실패", err);
@@ -82,7 +76,6 @@ export const CommunityHomePage = () => {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* 상단 제목 + 버튼 */}
       <div className="flex justify-between items-center mb-8">
         <h2 className="text-2xl font-bold">커뮤니티</h2>
         <button
@@ -95,29 +88,21 @@ export const CommunityHomePage = () => {
 
       {showComposer && <PostComposer onSubmit={createPost} />}
 
-      {/* 게시글 목록 */}
       <div className="space-y-6">
         {posts.map((post) => (
           <div
             key={post.id}
             className="flex justify-between items-start border-b border-gray-200 pb-6"
           >
-            {/* 왼쪽 영역 */}
             <div className="flex flex-1">
-              {/* 프로필 아이콘 */}
               <div className="w-12 h-12 rounded-full bg-gray-300 mr-4"></div>
-
-              {/* 본문 */}
               <div className="flex-1">
-                {/* 제목 */}
                 <h4
                   onClick={() => navigate(`/community/post/${post.id}`)}
                   className="text-[15px] font-semibold mb-2 cursor-pointer hover:underline"
                 >
                   {post.title}
                 </h4>
-
-                {/* 내용 */}
                 <p
                   onClick={() => navigate(`/community/post/${post.id}`)}
                   className="text-sm text-gray-600 mb-3 leading-relaxed cursor-pointer"
@@ -126,14 +111,8 @@ export const CommunityHomePage = () => {
                     ? post.content.slice(0, 80) + "..."
                     : post.content}
                 </p>
-
-                {/* 하단 정보 */}
                 <div className="flex items-center gap-4 text-sm text-gray-500">
-                  <span className="cursor-pointer hover:underline">
-                    게시글 제목. {post.repository?.name || ""}
-                  </span>
-                  <span>{post.createdAt || "9시간 전"}</span>
-
+                <span>{dayjs.utc(post.created_at).tz("Asia/Seoul").fromNow()}</span>
                   <span
                     onClick={() => handleLikeToggle(post.id)}
                     className="flex items-center gap-1 cursor-pointer"
@@ -145,14 +124,11 @@ export const CommunityHomePage = () => {
                     )}
                     {post.likes}
                   </span>
-
                   <span className="flex items-center gap-1">
                     <FaRegComment />
                     {post.comments}
                   </span>
-
                   <span>{post.author}</span>
-
                   <button
                     onClick={() => handleDelete(post.id)}
                     className="text-red-500 hover:underline text-xs"
@@ -162,11 +138,9 @@ export const CommunityHomePage = () => {
                 </div>
               </div>
             </div>
-
-            {/* 오른쪽 썸네일 */}
-            {post.image && (
+            {post.image_url && (
               <img
-                src={post.image}
+                src={post.image_url}
                 alt="게시글 이미지"
                 className="w-32 h-20 ml-5 rounded-xl object-cover"
               />
@@ -177,3 +151,5 @@ export const CommunityHomePage = () => {
     </div>
   );
 };
+
+// 8.25 최신화
