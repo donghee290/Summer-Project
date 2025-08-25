@@ -1,132 +1,147 @@
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { dummyPosts } from "../../data/dummyData";
+import React, { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
+import instance from "../../api/axiosInstance";
+import dayjs from "../../utils/dayjsConfig"; // ✅ 공통 dayjs 사용
 
-// 댓글 타입 정의
+const CURRENT_USER_NO = 1; // 임시 로그인 유저
+
 interface Comment {
   id: number;
   user: string;
+  user_no: number;
   content: string;
-  createdAt: string;
+  created_at: string;
 }
 
-// 게시물 타입 정의 (dummyPosts 기준)
 interface Post {
   id: number;
   title: string;
   content: string;
-  repository: {
-    id: number;
-    name: string;
-  };
-  image: string;
+  image: string | null;
   author: string;
   likes: number;
-  comments: number;
   liked: boolean;
+  comments: number;
+  created_at: string;
+  commentList?: Comment[];
 }
-
-// 현재 로그인된 유저 이름 (더미)
-const CURRENT_USER = "이강산";
 
 export const PostDetailPage = () => {
   const { postId } = useParams();
-  const post = dummyPosts.find((p) => p.id === Number(postId));
-
-  const [commentList, setCommentList] = useState<Comment[]>([
-    {
-      id: 1,
-      user: "홍길동",
-      content: "정말 유익한 글이네요!",
-      createdAt: "2025-08-07",
-    },
-    {
-      id: 2,
-      user: "임꺽정",
-      content: "저도 궁금했는데 덕분에 알게 되었어요!",
-      createdAt: "2025-08-07",
-    },
-  ]);
-
+  const [post, setPost] = useState<Post | null>(null);
   const [newComment, setNewComment] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  const handleSubmitComment = () => {
-    if (!newComment.trim()) return;
-
-    const nextComment: Comment = {
-      id: commentList.length + 1,
-      user: CURRENT_USER,
-      content: newComment,
-      createdAt: new Date().toISOString().split("T")[0],
-    };
-
-    setCommentList([...commentList, nextComment]);
-    setNewComment("");
+  const fetchPost = async () => {
+    try {
+      const res = await instance.get(`/posts/${postId}`);
+      setPost(res.data);
+    } catch (err) {
+      console.error("게시글 불러오기 실패:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (!post) {
-    return <div style={{ padding: 20 }}>❌ 게시글을 찾을 수 없습니다.</div>;
-  }
+  const handleSubmitComment = async () => {
+    if (!newComment.trim()) return;
+    try {
+      const res = await instance.post(`/posts/${postId}/comments`, {
+        content: newComment,
+      });
+      setPost((prev) =>
+        prev
+          ? { ...prev, commentList: [res.data, ...(prev.commentList || [])] }
+          : prev
+      );
+      setNewComment("");
+    } catch (err) {
+      console.error("댓글 작성 실패:", err);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: number) => {
+    try {
+      await instance.delete(`/posts/${postId}/comments/${commentId}`);
+      setPost((prev) =>
+        prev
+          ? {
+              ...prev,
+              commentList: prev.commentList?.filter((c) => c.id !== commentId) || [],
+            }
+          : prev
+      );
+    } catch (err) {
+      console.error("댓글 삭제 실패:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchPost();
+  }, [postId]);
+
+  if (loading) return <div className="p-6">⏳ 로딩 중...</div>;
+  if (!post) return <div className="p-6">❌ 게시글을 찾을 수 없습니다.</div>;
 
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto", padding: 20 }}>
-      <div style={{ fontSize: 14, color: "gray" }}>{post.repository.name}</div>
-      <h2>{post.title}</h2>
-      <p>{post.content}</p>
-      <p style={{ fontSize: 14, color: "gray" }}>작성자: {post.author}</p>
-      <hr style={{ margin: "24px 0" }} />
+    <div className="max-w-3xl mx-auto p-6">
+      <h2 className="text-2xl font-bold mb-2">{post.title}</h2>
+      <p className="mb-4">{post.content}</p>
+      {post.image && (
+        <img
+          src={post.image}
+          alt="게시글 이미지"
+          className="rounded-md mb-4 max-h-80 object-cover"
+        />
+      )}
+      <p className="text-sm text-gray-500">
+        작성자: {post.author} · {dayjs(post.created_at).tz().fromNow()}
+      </p>
+      <hr className="my-6" />
 
       {/* 댓글 영역 */}
-      <div>
-        <h3>💬 댓글</h3>
+      <h3 className="text-lg font-semibold mb-3">💬 댓글</h3>
+      <textarea
+        className="w-full border rounded-md p-2 h-24 resize-none mb-2"
+        placeholder="댓글을 입력하세요"
+        value={newComment}
+        onChange={(e) => setNewComment(e.target.value)}
+      />
+      <div className="text-right mb-4">
+        <button
+          onClick={handleSubmitComment}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        >
+          작성
+        </button>
+      </div>
 
-        {/* 댓글 입력창 */}
-        <textarea
-          style={{
-            width: "100%",
-            height: 80,
-            resize: "none",
-            padding: 10,
-            marginTop: 10,
-            border: "1px solid #ccc",
-            borderRadius: 6,
-          }}
-          placeholder="댓글을 입력하세요"
-          value={newComment}
-          onChange={(e) => setNewComment(e.target.value)}
-        />
-
-        <div style={{ textAlign: "right", marginTop: 8 }}>
-          <button
-            onClick={handleSubmitComment}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#333",
-              color: "#fff",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-            }}
-          >
-            작성
-          </button>
-        </div>
-
-        {/* 댓글 목록 */}
-        <div style={{ marginTop: 24 }}>
-          {commentList.length === 0 ? (
-            <p>아직 댓글이 없습니다.</p>
-          ) : (
-            commentList.map((cmt) => (
-              <div key={cmt.id} style={{ borderTop: "1px solid #eee", padding: "12px 0" }}>
-                <p style={{ marginBottom: 4 }}>
-                  <strong>{cmt.user}</strong> <span style={{ color: "#999", fontSize: 12 }}>{cmt.createdAt}</span>
-                </p>
-                <p style={{ margin: 0 }}>{cmt.content}</p>
-              </div>
-            ))
-          )}
-        </div>
+      <div className="space-y-4">
+        {post.commentList && post.commentList.length > 0 ? (
+          post.commentList.map((cmt) => (
+            <div key={cmt.id} className="border-t py-3">
+              <p className="mb-1 flex justify-between items-center">
+                <span>
+                  <strong>{cmt.user}</strong>{" "}
+                  <span className="text-gray-400 text-xs ml-2">
+                    {dayjs(cmt.created_at).tz().fromNow()}
+                  </span>
+                </span>
+                {cmt.user_no === CURRENT_USER_NO && (
+                  <button
+                    onClick={() => handleDeleteComment(cmt.id)}
+                    className="text-red-500 text-xs hover:underline"
+                  >
+                    삭제
+                  </button>
+                )}
+              </p>
+              <p>{cmt.content}</p>
+            </div>
+          ))
+        ) : (
+          <p className="text-gray-500">아직 댓글이 없습니다.</p>
+        )}
       </div>
     </div>
   );
