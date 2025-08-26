@@ -267,3 +267,122 @@ export const listMyBookmarks = async (req: Request, res: Response) => {
     return fail(res, 500, '잠시 후 다시 시도해 주세요.');
   }
 };
+/**
+ * GET /api/articles/top3
+ * 쿼리: topCategory, dateFrom, dateTo, limit, lines
+ * 프로시저: WEB_ARTICLE_TOP3(topCategory, dateFrom, dateTo, limit, lines)
+ */
+function getTodayKSTRangeISO() {
+  const nowUtc = new Date();
+  // shift to KST (+09:00)
+  const kstMs = nowUtc.getTime() + 9 * 60 * 60 * 1000;
+  const kst = new Date(kstMs);
+  const y = kst.getUTCFullYear();
+  const m = kst.getUTCMonth() + 1; // 1-12
+  const d = kst.getUTCDate();
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  const fromISO = `${y}-${pad(m)}-${pad(d)}T00:00:00+09:00`;
+  const toISO   = `${y}-${pad(m)}-${pad(d)}T23:59:59+09:00`;
+  return { fromISO, toISO };
+}
+
+function isoToMySQLDateTime(iso: string): string {
+  // "2025-08-26T00:00:00+09:00" -> "2025-08-26 00:00:00"
+  if (!iso) return iso;
+  const base = iso.replace('T', ' ');
+  // cut off timezone part if present
+  const idx = base.indexOf('+');
+  const core = idx > -1 ? base.slice(0, idx) : base;
+  return core.slice(0, 19);
+}
+
+function toStringArrayMaybeJSON(v: any): string[] | null {
+  if (!v) return null;
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v === 'string') {
+    try {
+      const parsed = JSON.parse(v);
+      return Array.isArray(parsed) ? parsed.map(String) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export const getTop3Summaries = async (req: Request, res: Response) => {
+  try {
+    const topCategory = req.query.topCategory as string | undefined;
+    const dateFrom = req.query.dateFrom as string | undefined;
+    const dateTo = req.query.dateTo as string | undefined;
+    const limitRaw = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    const linesRaw = req.query.lines !== undefined ? Number(req.query.lines) : undefined;
+    const limit = Number.isInteger(limitRaw) && (limitRaw as number) > 0 ? (limitRaw as number) : 3;
+    const lines = Number.isInteger(linesRaw) && (linesRaw as number) > 0 ? (linesRaw as number) : 3;
+
+    // Validate required params
+    if (!topCategory || !dateFrom || !dateTo) {
+      return fail(res, 400, 'topCategory, dateFrom, dateTo는 필수입니다.');
+    }
+
+    const dateFromSQL = isoToMySQLDateTime(dateFrom);
+    const dateToSQL   = isoToMySQLDateTime(dateTo);
+
+    const params = [
+      topCategory,
+      dateFromSQL,
+      dateToSQL,
+      limit,
+      lines,
+    ];
+    const raw = await callStoredProcedure('WEB_ARTICLE_TOP3', params) as any;
+    let rows = extractRows(raw);
+
+    // Fallback: if no data for the given range (e.g., yesterday empty), try TODAY (KST)
+    if (!rows || (Array.isArray(rows) && rows.length === 0)) {
+      const { fromISO, toISO } = getTodayKSTRangeISO();
+      const rawToday = await callStoredProcedure('WEB_ARTICLE_TOP3', [
+        topCategory,
+        isoToMySQLDateTime(fromISO),
+        isoToMySQLDateTime(toISO),
+        limit,
+        lines,
+      ]) as any;
+      rows = extractRows(rawToday);
+    }
+
+    const items = (rows ?? []).map((row: any) => {
+      let summary3: string[] = [];
+     
+     // 1) JSON 배열 필드 (다른 환경 호환)
+    const arr = toStringArrayMaybeJSON?.(row.summary_lines);
+    if (Array.isArray(arr)) {
+      summary3 = arr.slice(0, 3);
+    } else if (typeof row.summary_concat === 'string' && row.summary_concat.length > 0) {
+      // 2) 이번 프로시저 버전: '요약1||요약2||요약3'
+     summary3 = row.summary_concat
+      .split('||')
+      .map((s: string) => s.trim())
+      .filter((v: string) => v.length > 0)
+      .slice(0, 3);
+    } else {
+      // 3) 혹시 summary1~3 개별 컬럼이 온다면
+      summary3 = [row.summary1, row.summary2, row.summary3]
+        .filter((s: any) => typeof s === 'string' && s.length > 0)
+        .slice(0, 3);
+    }
+
+    return {
+      article_no: Number(row.article_no),
+      headline: row.headline,
+      top_category: row.top_category,
+      summary3,
+    };
+  });
+
+    return ok(res, { items });
+  } catch (err: any) {
+    console.error('[Article] getTop3Summaries error:', err);
+    return fail(res, 500, '잠시 후 다시 시도해 주세요.');
+  }
+};
