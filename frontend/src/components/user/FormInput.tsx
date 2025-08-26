@@ -26,8 +26,8 @@ const FormInput: React.FC<FormInputProps> = ({
         style={{
           width: '100%',
           padding: '12px 15px',
-          border: '1px solid #ddd',
-          borderRadius: '5px',
+          border: '1px solid #000',
+          borderRadius: '8px',
           fontSize: '16px',
           boxSizing: 'border-box'
         }}

@@ -6,6 +6,7 @@ interface FormButtonProps {
   children: React.ReactNode;
   variant?: 'primary' | 'secondary' | 'text';
   fullWidth?: boolean;
+  style?: React.CSSProperties;
 }
 
 const FormButton: React.FC<FormButtonProps> = ({ 
@@ -13,25 +14,26 @@ const FormButton: React.FC<FormButtonProps> = ({
   disabled = false, 
   children, 
   variant = 'primary',
-  fullWidth = true
+  fullWidth = true,
+  style
 }) => {
   const getButtonStyle = () => {
     const baseStyle = {
       width: fullWidth ? '100%' : 'auto',
       padding: '12px',
       border: 'none',
-      borderRadius: '5px',
+      borderRadius: '8px',
       fontSize: '16px',
       cursor: disabled ? 'not-allowed' : 'pointer',
       transition: 'background-color 0.3s ease',
-      marginBottom: '15px'
+      marginBottom: '5px',
     };
 
     switch (variant) {
       case 'primary':
         return {
           ...baseStyle,
-          backgroundColor: disabled ? '#ccc' : '#007bff',
+          backgroundColor: disabled ? '#ccc' : '#001E4F',
           color: '#fff'
         };
       case 'secondary':
@@ -44,9 +46,10 @@ const FormButton: React.FC<FormButtonProps> = ({
         return {
           ...baseStyle,
           backgroundColor: 'transparent',
-          color: 'gray',
-          fontSize: '15px',
-          padding: '10px'
+          color: 'black',
+          fontSize: '18px',
+          padding: '10px',
+          textDecoration: 'underline'
         };
       default:
         return baseStyle;
@@ -57,7 +60,7 @@ const FormButton: React.FC<FormButtonProps> = ({
     <button
       onClick={onClick}
       disabled={disabled}
-      style={getButtonStyle()}
+      style={{ ...getButtonStyle(), ...(style || {}) }}
     >
       {children}
     </button>

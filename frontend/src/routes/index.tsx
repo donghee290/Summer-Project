@@ -12,11 +12,12 @@ const AppRoutes = () => (
   <BrowserRouter>
     <Routes>
       {/* Layout 없는 페이지 */}
+
+      {/* Layout 적용된 페이지 */}
       <Route path="/user/login" element={<LoginPage />} />
       <Route path="/user/register" element={<RegisterPage />} />
       <Route path="/user/password-reset" element={<PasswordResetPage />} />
-
-      {/* Layout 적용된 페이지 */}
+      
       <Route path="/" element={<Layout><HomePage /></Layout>} />
       <Route path="/search" element={<Layout><SearchPage /></Layout>} />
       <Route path="/articles" element={<Layout><ArticleListPage /></Layout>} />

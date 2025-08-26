@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { sign } from "../../config/jwt";
+import { sign, signRefresh, verifyRefresh } from "../../config/jwt";
 import { AuthRequest } from "../../middlewares/user/auth";
 
 import { callStoredProcedure } from "../../config/database/database";
@@ -13,7 +13,6 @@ export const login = async (req: Request, res: Response) => {
 
     const loginResult = await callStoredProcedure<any[]>('WEB_GET_LOGIN', [username, password]);
     const user = (loginResult && loginResult.length > 0) ? loginResult[0] : null;
-    // console.log(user.user_no, user.user_id);
 
     if (user) {
       const payload = {
@@ -21,16 +20,21 @@ export const login = async (req: Request, res: Response) => {
         userId: user.user_id,
       };
 
-      // JWT 토큰 생성
-      // 미들웨어에서 인증 성공 시 user 정보를 넘기기 위함
+      // 액세스/리프레시 토큰 생성
       const token = sign({
         userNo: payload.userNo,
         userId: payload.userId,
+      });
+      const refreshToken = signRefresh({
+        userNo: payload.userNo,
+        userId: payload.userId,
+        tokenType: "refresh",
       });
 
       return res.json({
         message: "로그인 성공",
         token: token,
+        refreshToken: refreshToken,
       });
     }
 
@@ -38,6 +42,29 @@ export const login = async (req: Request, res: Response) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "서버 오류가 발생했습니다." });
+  }
+};
+
+// 리프레시 토큰으로 액세스 토큰 재발급
+export const refreshAccessToken = async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body as { refreshToken?: string };
+    if (!refreshToken) {
+      return res.status(400).json({ message: "리프레시 토큰이 필요합니다." });
+    }
+
+    const decoded = verifyRefresh(refreshToken) as any;
+    if (!decoded || decoded.tokenType !== "refresh") {
+      return res.status(401).json({ message: "유효하지 않은 리프레시 토큰입니다." });
+    }
+
+    const { userNo, userId } = decoded as { userNo: number; userId: string };
+    const newAccessToken = sign({ userNo, userId });
+
+    return res.status(200).json({ token: newAccessToken });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "토큰 재발급 중 오류가 발생했습니다." });
   }
 };
 

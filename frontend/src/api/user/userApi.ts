@@ -8,6 +8,7 @@ interface LoginPayload {
 interface LoginResponse {
     message: string;
     token: string;
+    refreshToken: string;
 }
 
 interface RegisterPayload {
@@ -31,6 +32,14 @@ export const login = async (payload: LoginPayload): Promise<LoginResponse> => {
     const response = await axiosInstance.post<LoginResponse>('/user/login', payload); 
     console.log(response.data);
     return response.data;
+};
+
+export const refreshAccessToken = async (refreshToken: string): Promise<{ token: string }> => {
+  const response = await axiosInstance.post<{ token: string }>(
+    '/user/refresh-token',
+    { refreshToken }
+  );
+  return response.data;
 };
 
 export const register = async (payload: RegisterPayload): Promise<{ message: string }> => {
