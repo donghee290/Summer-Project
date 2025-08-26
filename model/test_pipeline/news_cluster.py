@@ -7,23 +7,19 @@ from typing import Dict
 import warnings
 import logging
 
-# Silence tokenizers fork warning
-import os; os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score, adjusted_rand_score
 import hdbscan
 import matplotlib.pyplot as plt
 from collections import Counter
-import re
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 warnings.filterwarnings('ignore')
 logging.getLogger('sentence_transformers').setLevel(logging.ERROR)
 plt.rcParams['font.family'] = ['AppleGothic', 'Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
+
 
 def convert_numpy_types(obj):
     """numpy int, float 타입을 python 기본 타입으로 변환 재귀함수"""
@@ -38,6 +34,55 @@ def convert_numpy_types(obj):
     else:
         return obj
 
+# --- CATEGORY_TOP3 전용 헬퍼 함수들 ---
+TARGET_CATEGORIES = ["국내경제", "해외경제", "사회", "연예"]
+
+ECON_FOREIGN_KEYWORDS = [
+    "해외", "국제", "세계", "글로벌", "대외", "대외요인", "IMF", "WB", "WTO", "OECD",
+    "미국", "중국", "일본", "유럽", "EU", "유로존", "영국", "독일", "프랑스", "인도",
+    "싱가포르", "베트남", "대만", "홍콩", "러시아", "우크라이나", "중동", "UAE", "사우디",
+    "Fed", "연준", "FOMC", "ECB", "BOJ", "BOE", "달러", "엔화", "위안화"
+]
+
+def normalize_top_category(row: dict) -> str:
+    """원본 category와 텍스트를 바탕으로 최종 카테고리를 [국내경제, 해외경제, 사회, 연예] 중 하나로 매핑"""
+    raw_cat = str(row.get("category", "")).lower()
+    title = str(row.get("title", ""))
+    content = str(row.get("content", ""))
+    text = f"{title} {content}"
+
+    # economy 분기: 국내/해외
+    if "economy" in raw_cat or "경제" in raw_cat:
+        if any(kw in text for kw in ECON_FOREIGN_KEYWORDS):
+            return "해외경제"
+        return "국내경제"
+
+    if "society" in raw_cat or "사회" in raw_cat:
+        return "사회"
+
+    if "entertainment" in raw_cat or "연예" in raw_cat or "culture" in raw_cat:
+        return "연예"
+
+    # 기타는 사회로 귀속 (보수적 기본값)
+    return "사회"
+
+
+def compute_importance_scores(embeds_cat: np.ndarray, text_lengths: np.ndarray) -> np.ndarray:
+    """카테고리 내 대표성(centroid 유사도) + 텍스트 길이 정규화를 합쳐 중요도 산출"""
+    if embeds_cat.shape[0] == 0:
+        return np.array([])
+    centroid = embeds_cat.mean(axis=0, keepdims=True)
+    sim = cosine_similarity(embeds_cat, centroid).ravel()  # 0~1 근처
+
+    # 텍스트 길이 정규화 (0~1)
+    if len(text_lengths) > 0:
+        tl = text_lengths.astype(float)
+        tl_norm = (tl - tl.min()) / (tl.max() - tl.min() + 1e-8)
+    else:
+        tl_norm = np.zeros_like(sim)
+
+    # 가중 평균 (대표성 0.7, 길이 0.3)
+    return 0.7 * sim + 0.3 * tl_norm
 
 class KoSimCSENewsPipeline:
     def __init__(self, config: Dict = None):
@@ -47,11 +92,11 @@ class KoSimCSENewsPipeline:
             'min_text_length': 50,
             'min_title_length': 10,
             'max_text_length': 1000,
-            'clustering_methods': ['HDBSCAN', 'K-Means', 'DBSCAN'],
+            'clustering_methods': ['CATEGORY_TOP3'],
             'hdbscan_params': {
                 'min_cluster_size': 20,
                 'min_samples': 8,
-                'metric': 'euclidean',
+                'metric': 'cosine',
                 'cluster_selection_epsilon': 0.25
             },
             'kmeans_params': {
@@ -64,15 +109,6 @@ class KoSimCSENewsPipeline:
                 'min_samples': 10,
                 'metric': 'cosine'
             },
-            'use_time_bucket': True,
-            'time_bucket_hours': 6,
-            'use_near_duplicate_merge': True,
-            'ndup_vector': 'char',  # 'char' or 'word'
-            'ndup_char_ngram_min': 3,
-            'ndup_char_ngram_max': 5,
-            'ndup_word_ngram_min': 1,
-            'ndup_word_ngram_max': 2,
-            'ndup_threshold': 0.92,
             'output_dir': str(Path(__file__).resolve().parents[2] / "results" / "cluster_results"),
             'save_visualizations': True
         }
@@ -92,93 +128,6 @@ class KoSimCSENewsPipeline:
 
         print(f"🚀 KoSimCSE 뉴스 클러스터링 파이프라인 초기화")
         print(f"   출력 디렉토리: {self.output_dir}")
-
-    # ===== Time bucketing & near-duplicate helpers =====
-    def _parse_pubdate(self, s: str):
-        try:
-            dt = pd.to_datetime(s, utc=True, errors='coerce')
-            return dt
-        except Exception:
-            return pd.NaT
-
-    def _add_time_bucket(self):
-        if self.articles_df is None or 'pubDate' not in self.articles_df.columns:
-            return
-        self.articles_df['published_at'] = self.articles_df['pubDate'].apply(self._parse_pubdate)
-        hours = int(self.config.get('time_bucket_hours', 6))
-        self.articles_df['event_bucket'] = self.articles_df['published_at'].dt.floor(f'{hours}H')
-
-    def _normalize_for_dup(self, text: str) -> str:
-        if not isinstance(text, str):
-            return ''
-        t = text
-        t = re.sub(r'[\[\(\{][^\]\)\}]{0,30}[\]\)\}]', ' ', t)
-        t = re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', ' ', t)
-        t = re.sub(r'©|무단전재|재배포|기자|사진=|연합뉴스|뉴스1', ' ', t)
-        t = re.sub(r'\s+', ' ', t).strip().lower()
-        return t
-
-    def _merge_near_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
-        if df.empty:
-            return df
-        texts = (df['fullText']
-                 .fillna('')
-                 .apply(self._normalize_for_dup)
-                 .tolist())
-        vec_mode = str(self.config.get('ndup_vector', 'char'))
-        if vec_mode == 'word':
-            v = TfidfVectorizer(ngram_range=(int(self.config.get('ndup_word_ngram_min', 1)),
-                                             int(self.config.get('ndup_word_ngram_max', 2))),
-                                min_df=1, max_df=1.0)
-        else:
-            v = TfidfVectorizer(analyzer='char',
-                                ngram_range=(int(self.config.get('ndup_char_ngram_min', 3)),
-                                             int(self.config.get('ndup_char_ngram_max', 5))),
-                                min_df=1, max_df=1.0)
-        X = v.fit_transform(texts)
-        sim = cosine_similarity(X, dense_output=False)
-        thr = float(self.config.get('ndup_threshold', 0.92))
-
-        n = df.shape[0]
-        adj = [[] for _ in range(n)]
-        coo = sim.tocoo()
-        for i, j, val in zip(coo.row, coo.col, coo.data):
-            if i >= j:
-                continue
-            if val >= thr:
-                adj[i].append(j)
-                adj[j].append(i)
-
-        visited = [False] * n
-        groups = []
-        for i in range(n):
-            if visited[i]:
-                continue
-            stack = [i]
-            visited[i] = True
-            comp = [i]
-            while stack:
-                u = stack.pop()
-                for vtx in adj[u]:
-                    if not visited[vtx]:
-                        visited[vtx] = True
-                        stack.append(vtx)
-                        comp.append(vtx)
-            groups.append(comp)
-
-        reps = []
-        for comp in groups:
-            sub = df.iloc[comp]
-            rep_idx = sub['textLength'].astype(float).fillna(0).values.argmax()
-            rep_row = sub.iloc[rep_idx].copy()
-            rep_row['dup_count'] = int(len(comp))
-            rep_row['merged_indices'] = comp
-            merged_full = sub.loc[sub['textLength'].astype(float).idxmax(), 'fullText']
-            rep_row['fullText_merged'] = merged_full if isinstance(merged_full, str) else rep_row.get('fullText', '')
-            reps.append(rep_row)
-
-        merged_df = pd.DataFrame(reps).reset_index(drop=True)
-        return merged_df
 
     def load_model(self) -> bool:
         print(f"\n🤖 모델 로딩: {self.config['model_name']}")
@@ -221,6 +170,7 @@ class KoSimCSENewsPipeline:
                             'fullText': full_text,
                             'textLength': len(full_text),
                             'category': category,
+                            'top_category': normalize_top_category({'category': category, 'title': title, 'content': content}),
                             'index': len(articles)
                         })
                         category_stats[category] = category_stats.get(category, 0) + 1
@@ -230,18 +180,6 @@ class KoSimCSENewsPipeline:
             print("카테고리별 분포:")
             for cat, count in category_stats.items():
                 print(f"  {cat}: {count}개")
-
-            # === (1) Time bucket enrichment ===
-            if self.config.get('use_time_bucket', True):
-                self._add_time_bucket()
-
-            # === (2) Near-duplicate merge (super-doc compression) ===
-            if self.config.get('use_near_duplicate_merge', True):
-                before = len(self.articles_df)
-                self.articles_df = self._merge_near_duplicates(self.articles_df)
-                after = len(self.articles_df)
-                print(f"🔁 근접중복 병합: {before} → {after} 문서 (압축 비율 {(1 - after/max(before,1)):.1%})")
-
             return True
         except Exception as e:
             print(f"❌ 데이터 로딩 실패: {e}")
@@ -253,9 +191,7 @@ class KoSimCSENewsPipeline:
             print("❌ 모델 또는 뉴스 데이터가 준비되지 않았습니다.")
             return False
         try:
-            texts = (self.articles_df['fullText_merged']
-                     if 'fullText_merged' in self.articles_df.columns
-                     else self.articles_df['fullText']).tolist()
+            texts = self.articles_df['fullText'].tolist()
             self.embeddings = self.model.encode(
                 texts,
                 batch_size=self.config['batch_size'],
@@ -270,73 +206,51 @@ class KoSimCSENewsPipeline:
             return False
 
     def run_clustering(self) -> Dict:
-        print(f"\n🔍 클러스터링 알고리즘 실행 중...")
-        if self.embeddings is None:
-            print("❌ 임베딩이 생성되지 않았습니다.")
+        print(f"\n🔍 카테고리 TOP3 선별 모드 실행 중...")
+        if self.embeddings is None or self.articles_df is None:
+            print("❌ 임베딩 또는 데이터가 준비되지 않았습니다.")
             return {}
 
+        # 최종 클러스터 레이블(정수) 초기화
+        labels = np.full(len(self.articles_df), -1, dtype=int)
+        cluster_id_counter = 0
+        mapping_info = {}
+
         results = {}
-        scores = {}
 
-        if 'HDBSCAN' in self.config['clustering_methods']:
-            print("1. HDBSCAN 클러스터링...")
-            try:
-                clusterer = hdbscan.HDBSCAN(**self.config['hdbscan_params'])
-                labels = clusterer.fit_predict(self.embeddings)
-                results['HDBSCAN'] = labels
-                valid_mask = labels != -1
-                if valid_mask.sum() > 1 and len(set(labels[valid_mask])) > 1:
-                    score = silhouette_score(self.embeddings[valid_mask], labels[valid_mask])
-                    scores['HDBSCAN'] = score
-                n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-                n_noise = np.sum(labels == -1)
-                print(f"   ✅ 완료: {n_clusters}개 클러스터, 노이즈 {n_noise}개")
-            except Exception as e:
-                print(f"   ❌ HDBSCAN 실패: {e}")
+        for cat in TARGET_CATEGORIES:
+            df_cat = self.articles_df[self.articles_df['top_category'] == cat]
+            if df_cat.empty:
+                continue
+            idx_cat = df_cat.index.to_numpy()
+            embeds_cat = self.embeddings[idx_cat]
+            text_len_cat = df_cat['textLength'].to_numpy()
 
-        if 'K-Means' in self.config['clustering_methods']:
-            print("2. K-Means 클러스터링...")
-            try:
-                n_categories = len(self.articles_df['category'].unique())
-                optimal_k = min(n_categories + 2, 15)
-                kmeans = KMeans(n_clusters=optimal_k, **self.config['kmeans_params'])
-                labels = kmeans.fit_predict(self.embeddings)
-                results['K-Means'] = labels
-                score = silhouette_score(self.embeddings, labels)
-                scores['K-Means'] = score
-                print(f"   ✅ 완료: {optimal_k}개 클러스터, 실루엣 {score:.3f}")
-            except Exception as e:
-                print(f"   ❌ K-Means 실패: {e}")
+            # 중요도 스코어 계산
+            scores = compute_importance_scores(embeds_cat, text_len_cat)
+            # 상위 3개 인덱스 선택 (데이터가 적으면 있는 만큼)
+            top_k = min(3, len(scores))
+            top_idx_local = np.argsort(-scores)[:top_k]
+            chosen_global_idx = idx_cat[top_idx_local]
 
-        if 'DBSCAN' in self.config['clustering_methods']:
-            print("3. DBSCAN 클러스터링...")
-            try:
-                dbscan = DBSCAN(**self.config['dbscan_params'])
-                labels = dbscan.fit_predict(self.embeddings)
-                results['DBSCAN'] = labels
-                valid_mask = labels != -1
-                if valid_mask.sum() > 1 and len(set(labels[valid_mask])) > 1:
-                    score = silhouette_score(self.embeddings[valid_mask], labels[valid_mask])
-                    scores['DBSCAN'] = score
-                n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-                n_noise = np.sum(labels == -1)
-                print(f"   ✅ 완료: {n_clusters}개 클러스터, 노이즈 {n_noise}개")
-            except Exception as e:
-                print(f"   ❌ DBSCAN 실패: {e}")
+            # 각 선택 기사 주변으로 유사한 기사들을 묶는 간단한 군집(옵션)
+            # 여기서는 선택 기사 자신만 포함(대표 기사 3개를 선택) — 필요 시 확장 가능
+            for j, g_idx in enumerate(chosen_global_idx):
+                labels[g_idx] = cluster_id_counter
+                mapping_info[int(cluster_id_counter)] = {
+                    'top_category': cat,
+                    'anchor_title': self.articles_df.loc[g_idx, 'title']
+                }
+                cluster_id_counter += 1
 
-        if scores:
-            self.best_method = max(scores, key=scores.get)
-            self.cluster_labels = results[self.best_method]
-            print(f"\n🎯 최적 방법: {self.best_method} (실루엣 계수: {scores[self.best_method]:.3f})")
-        elif results:
-            if 'HDBSCAN' in results:
-                self.best_method = 'HDBSCAN'
-                self.cluster_labels = results['HDBSCAN']
-            else:
-                self.best_method = list(results.keys())[0]
-                self.cluster_labels = results[self.best_method]
-            print(f"\n🎯 선택된 방법: {self.best_method}")
+        if cluster_id_counter == 0:
+            print("❌ 어떤 카테고리에서도 기사를 찾지 못했습니다.")
+            return {}
 
+        self.best_method = 'CATEGORY_TOP3'
+        self.cluster_labels = labels
+        results['CATEGORY_TOP3'] = labels
+        print(f"   ✅ 카테고리별 대표 기사 선별 완료: 총 {cluster_id_counter}개 (카테고리당 최대 3개)")
         return results
     
     def analyze_clusters(self) -> Dict:
@@ -345,7 +259,7 @@ class KoSimCSENewsPipeline:
             print("❌ 클러스터링이 실행되지 않았습니다.")
             return {}
 
-        unique_clusters = sorted(set(self.cluster_labels))
+        unique_clusters = sorted(c for c in set(self.cluster_labels) if c != -1)
         analysis = {}
         
         for cluster_id in unique_clusters:
@@ -391,7 +305,7 @@ class KoSimCSENewsPipeline:
             valid_pred = self.cluster_labels[valid_mask]
             valid_true = true_labels[valid_mask]
             valid_embeddings = self.embeddings[valid_mask]
-            if len(set(valid_pred)) > 1:
+            if len(set(valid_pred)) > 1 and sum((valid_pred == cid).sum() >= 2 for cid in set(valid_pred)) >= 2:
                 silhouette = silhouette_score(valid_embeddings, valid_pred)
                 metrics['silhouette'] = silhouette
                 ari = adjusted_rand_score(valid_true, valid_pred)
@@ -422,39 +336,22 @@ class KoSimCSENewsPipeline:
             return
         try:
             results_df = self.articles_df.copy()
+            if 'top_category' not in results_df.columns:
+                results_df['top_category'] = self.articles_df.get('top_category', pd.Series([None]*len(self.articles_df)))
             results_df['cluster'] = self.cluster_labels
             results_df['method'] = self.best_method
-
-            # Attach time bucket & near-duplicate info when available
-            if 'event_bucket' in results_df.columns:
-                results_df['event_bucket'] = results_df['event_bucket']
-            if 'dup_count' in results_df.columns:
-                results_df['dup_count'] = results_df['dup_count']
-            if 'merged_indices' in results_df.columns:
-                results_df['merged_indices'] = results_df['merged_indices']
-            if 'fullText_merged' in results_df.columns:
-                results_df['fullText_merged'] = results_df['fullText_merged']
-
+            
             ts = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
             csv_path = self.output_dir / f'clustering_results_detailed_{ts}.csv'
             results_df.to_csv(csv_path, index=False, encoding='utf-8')
-
+            
             if self.cluster_analysis:
                 summary_path = self.output_dir / f'cluster_summary_{ts}.json'
                 with open(summary_path, 'w', encoding='utf-8') as f:
                     json.dump(self.cluster_analysis, f, ensure_ascii=False, indent=2)
-                print(f"   ✅ 클러스터 요약: {summary_path}")
-
-            # --- Make articles JSON-serializable (convert Timestamp/NaT etc.) ---
-            safe_articles_df = self.articles_df.copy()
-            def _json_safe(x):
-                if isinstance(x, (pd.Timestamp, datetime)):
-                    return x.isoformat() if not pd.isna(x) else None
-                return x
-            safe_articles_df = safe_articles_df.applymap(_json_safe)
-
+            
             embeddings_data = {
-                'articles': safe_articles_df.to_dict('records'),
+                'articles': self.articles_df.to_dict('records'),
                 'embeddings': self.embeddings.tolist(),
                 'cluster_labels': self.cluster_labels.tolist(),
                 'metadata': {
@@ -465,8 +362,7 @@ class KoSimCSENewsPipeline:
                     'timestamp': datetime.now().isoformat()
                 }
             }
-            embeddings_data = convert_numpy_types(embeddings_data)
-
+            
             embeddings_path = self.output_dir / f'embeddings_and_clusters_{ts}.json'
             with open(embeddings_path, 'w', encoding='utf-8') as f:
                 json.dump(embeddings_data, f, ensure_ascii=False, indent=2)
@@ -494,9 +390,10 @@ class KoSimCSENewsPipeline:
 
 def main():
     NEWS_DIR = Path(__file__).resolve().parents[2] / "model" / "results" / "collect_results"
-    latest = max(NEWS_DIR.glob("news_colletced_*h_*.json"), key=lambda p: p.stat().st_mtime)
+    latest = max(NEWS_DIR.glob("news_collected_*h_*.json"), key=lambda p: p.stat().st_mtime)
     news_file_path = str(latest)
     print("Using:", news_file_path)
+    print("Mode: CATEGORY_TOP3 (국내경제/해외경제/사회/연예 각 3건 선별)")
 
     config = {
         'model_name': 'BM-K/KoSimCSE-roberta-multitask',
@@ -504,7 +401,7 @@ def main():
         'min_text_length': 50,
         'output_dir': str(Path(__file__).resolve().parents[2] / "model" / "results" / "cluster_results"),
         'save_visualizations': True,
-        'clustering_methods': ['HDBSCAN', 'K-Means', 'DBSCAN']
+        'clustering_methods': ['CATEGORY_TOP3']
     }
 
     pipeline = KoSimCSENewsPipeline(config)

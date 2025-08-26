@@ -320,7 +320,7 @@ def main():
 
     mkdir_p(args.outdir)
     ts = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
-    out = os.path.join(args.outdir, f"news_colletced_{args.hours}h_{ts}.json")
+    out = os.path.join(args.outdir, f"news_collected_{args.hours}h_{ts}.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 

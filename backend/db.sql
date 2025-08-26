@@ -34,6 +34,18 @@ CREATE TABLE Article(
     article_view_count INT DEFAULT 0
 );
 
+-- 세줄 요약 테이블
+CREATE TABLE DailyDigest (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  ref_date DATE NOT NULL,
+  category VARCHAR(50) NOT NULL,
+  line_no TINYINT NOT NULL,           -- 1,2,3 줄
+  article_no INT NOT NULL,
+  one_line_summary VARCHAR(255) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (article_no) REFERENCES Article(article_no) ON DELETE CASCADE
+);
+
 -- 출처 테이블
 -- 출처 고유번호, 신문사 이름, 원본 링크
 CREATE TABLE Article_Source(

@@ -376,6 +376,21 @@ def enforce_bullet_style(text: str) -> str:
     # 3) 3개 미만이면 있는 만큼만 반환
     out = " · ".join(cleaned)
     return clamp(out, SUMMARY_MAX_CHARS)
+
+# === DailyDigest 생성 보조 ===
+def split_three_lines(gen_summary: str, fallback_text: str) -> list[str]:
+    """
+    ' · ' 또는 문장 경계로 최대 3줄을 추출
+    """
+    import re
+    if not gen_summary:
+        gen_summary = enforce_bullet_style(fallback_text or "")
+    parts = [p.strip() for p in re.split(r'\s*[·•;]\s+|(?<= [.!?])\s+', gen_summary) if p.strip()]
+    return parts[:3]
+
+# Digest 후보/대표성 누적 구조
+digest_candidates = []   # {category, cluster_id, article_tmp_id, lines, strength}
+cluster_strength = {}    # (category, cluster_id) -> int
     
 
 def main():
@@ -446,9 +461,11 @@ def main():
 
         image_url = generate_article_image(gen_title, gen_rewrite, norm_cat, int(cluster_id))
 
-        # DB 컬럼과 매핑되는 결과 행(Article 테이블용)
-        # article_image_url은 현재 수집 스키마에 없으므로 빈 값
+        # 이 생성 아티클의 임시 ID를 먼저 부여(1부터 증가; CSV에도 기록)
+        article_tmp_id = len(articles_rows) + 1
+
         articles_rows.append({
+            "article_tmp_id": article_tmp_id,
             "article_title": gen_title,
             "article_summary": gen_summary,
             "article_content": gen_rewrite,
@@ -465,9 +482,21 @@ def main():
             "source_urls": ",".join(sorted(set([u for u in urls if u]))),
         })
 
+        # --- DailyDigest 후보(3줄) 기록 및 대표성 점수 누적 ---
+        lines3 = split_three_lines(gen_summary, gen_rewrite)
+        digest_candidates.append({
+            "category": norm_cat,
+            "cluster_id": int(cluster_id),
+            "article_tmp_id": article_tmp_id,
+            "lines": lines3,
+            "strength": len(used_indices) if used_indices else 1,
+        })
+        ckey = (norm_cat, int(cluster_id))
+        cluster_strength[ckey] = cluster_strength.get(ckey, 0) + (len(used_indices) if used_indices else 1)
+
         # 소스 파싱: 군집에 사용된 각 기사별로 press_name/source_url 확보
         # 이후 Article insert 후 생성된 article_no와 매핑해야 하므로 스테이징에 article_tmp_id를 부여
-        article_tmp_id = len(articles_rows)  # 1부터 증가(해당 CSV의 행번호)
+        # 위에서 부여한 article_tmp_id를 그대로 사용
         for src_val, url in zip(sources, urls):
             press_name, source_url = parse_source_field(src_val, url)
             if not press_name and not source_url:
@@ -480,6 +509,34 @@ def main():
             })
 
         time.sleep(SLEEP_BETWEEN_CALLS)
+
+    # === 국내경제 최상위 클러스터 3줄 요약 스테이징 생성 ===
+    from datetime import timezone, timedelta
+    kst = timezone(timedelta(hours=9))
+    ref_date = datetime.now(kst).date().isoformat()
+
+    domestic_keys = [(cat, cid) for (cat, cid) in cluster_strength.keys() if cat == "국내경제"]
+
+    digest_staging_rows = []
+    if domestic_keys:
+        # 대표성 점수가 가장 큰 클러스터 선택
+        top_key = max(domestic_keys, key=lambda k: cluster_strength.get(k, 0))
+        top_cat, top_cluster_id = top_key
+
+        # 해당 클러스터의 생성 기사 중 대표성 높은 항목 1개 선택
+        top_items = [c for c in digest_candidates if c["category"] == top_cat and c["cluster_id"] == top_cluster_id]
+        top_items = sorted(top_items, key=lambda x: x.get("strength", 1), reverse=True)
+        if top_items:
+            chosen = top_items[0]
+            lines = chosen.get("lines", []) or []
+            for i, line in enumerate(lines[:3], start=1):
+                digest_staging_rows.append({
+                    "ref_date": ref_date,
+                    "category": "국내경제",
+                    "line_no": i,
+                    "article_tmp_id": chosen["article_tmp_id"],
+                    "one_line_summary": str(line)[:255],
+                })
 
     # 결과 저장
     ts = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
@@ -498,9 +555,13 @@ def main():
     staging_csv = OUT_BASE / f"article_sources_staging_{ts}.csv"
     out_src_staging.to_csv(staging_csv, index=False, encoding="utf-8-sig")
 
+    out_digest = pd.DataFrame(digest_staging_rows)
+    digest_csv = OUT_BASE / f"daily_digest_staging_{ts}.csv"
+    out_digest.to_csv(digest_csv, index=False, encoding="utf-8-sig")
     print(f"완료: {cluster_csv} ({len(out_articles)} rows)")
     print(f"완료: {uniq_csv} ({len(out_src_unique)} unique sources)")
     print(f"완료: {staging_csv} ({len(out_src_staging)} mappings)")
+    print(f"완료: {digest_csv} ({len(out_digest)} rows)")
     
 if __name__ == "__main__":
     main()
