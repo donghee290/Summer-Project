@@ -5,10 +5,10 @@ import IconButton from "../ui/IconButton";
 
 const navItems = [
   { name: "홈", path: "/" },
-  { name: "국내경제", path: "/articles" },
-  { name: "해외경제", path: "/articles/global" },
-  { name: "사회", path: "/articles/society" },
-  { name: "트렌드", path: "/articles/trend" },
+  { name: "국내경제", path: "/koreaeconomy" },
+  { name: "해외경제", path: "/globaleconomy" },
+  { name: "사회", path: "/society" },
+  { name: "트렌드", path: "/trend" },
   { name: "커뮤니티", path: "/community" },
 ];
 

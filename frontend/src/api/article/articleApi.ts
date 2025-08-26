@@ -1,6 +1,32 @@
 // frontend/src/api/article/articleApi.ts
 import axios from '../axiosInstance';
 
+// ===== 추가 타입 (Top3/필터링 지원) =====
+export type TopCategory = '국내경제' | '해외경제' | '사회' | '트렌드';
+
+export interface ArticleListQuery {
+  topCategory?: TopCategory;        // 상단 탭 필터
+  dateFrom?: string;                // ISO(+09:00) — 어제 00:00:00
+  dateTo?: string;                  // ISO(+09:00) — 오늘 00:00:00
+  lines?: 1 | 2 | 3;                // 세 줄 요약 등
+  sort?: 'latest' | 'popular';
+  page?: number;
+  limit?: number;
+}
+
+export interface Top3Issue {
+  article_no: number;          // 대표 아티클 ID (클릭 이동)
+  headline: string;            // 한 줄 요약 텍스트
+  frequency: number;           // 빈도(동일/유사 기사 수)
+  top_category: TopCategory;
+}
+
+export interface Top3Query {
+  topCategory: TopCategory;
+  dateFrom: string;
+  dateTo: string;
+}
+
 // ===== 타입 정의 =====
 export interface Article {
   article_no: number;
@@ -54,6 +80,11 @@ export interface ArticleListResponse {
       totalPages: number;
     };
   };
+}
+
+export interface Top3Response {
+  success: boolean;
+  data: { items: Top3Issue[] };
 }
 
 export interface BookmarkResponse {
@@ -135,4 +166,29 @@ export const searchArticles = async (
     params: { keyword, category, page, limit },
   });
   return response.data;
+};
+
+// 확장: 필터형 목록 조회 (기존 getArticles는 유지)
+export const getArticlesFiltered = async (
+  query: ArticleListQuery
+): Promise<ArticleListResponse> => {
+  const params = {
+    page: query.page ?? 1,
+    limit: query.limit ?? 20,
+    topCategory: query.topCategory,
+    dateFrom: query.dateFrom,
+    dateTo: query.dateTo,
+    lines: query.lines,
+    sort: query.sort,
+  };
+  const response = await axios.get('/articles', { params });
+  return response.data;
+};
+
+// 어제의 카테고리별 Top3 이슈(한 줄 요약)
+export const getTop3Issues = async (
+  q: Top3Query
+): Promise<Top3Issue[]> => {
+  const response = await axios.get<Top3Response>('/articles/top3', { params: q });
+  return response.data.data.items;
 };

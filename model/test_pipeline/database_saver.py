@@ -1,14 +1,11 @@
 import os
-import math
 import pandas as pd
 from pathlib import Path
-from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 import pymysql
 from dotenv import load_dotenv, find_dotenv
 
-# ---- .env 로드 ----
 load_dotenv(find_dotenv(), override=True)
 
 HERE = Path(__file__).resolve()
@@ -22,6 +19,7 @@ def _latest_or_default(glob_pat: str, default_name: str) -> Path:
 ARTICLES_CSV  = _latest_or_default("cluster_articles_for_db_*.csv", "cluster_articles_for_db.csv")
 UNIQUE_SRC_CSV = _latest_or_default("article_sources_unique_*.csv", "article_sources_unique.csv")
 STAGING_CSV    = _latest_or_default("article_sources_staging_*.csv", "article_sources_staging.csv")
+DIGEST_CSV    = _latest_or_default("daily_digest_staging_*.csv", "daily_digest_staging.csv")
 
 # ---- Cloud SQL Connector (옵션) ----
 USE_CONNECTOR = bool(os.getenv("INSTANCE_CONNECTION_NAME"))
@@ -94,13 +92,14 @@ def _chunked(iterable, size=1000):
         yield iterable[i:i+size]
 
 def main():
-    ok, missing = _exists_all([ARTICLES_CSV, UNIQUE_SRC_CSV, STAGING_CSV])
+    ok, missing = _exists_all([ARTICLES_CSV, UNIQUE_SRC_CSV, STAGING_CSV, DIGEST_CSV])
     if not ok:
         raise FileNotFoundError("누락된 CSV 파일:\n" + "\n".join(str(p) for p in missing))
 
     arts = pd.read_csv(ARTICLES_CSV)
     uniq = pd.read_csv(UNIQUE_SRC_CSV)
     stg  = pd.read_csv(STAGING_CSV)
+    digest = pd.read_csv(DIGEST_CSV)
 
     # 빈 press/url 제거
     uniq["press_name"] = uniq["press_name"].fillna("").map(str).str.strip()
@@ -137,7 +136,12 @@ def main():
                     _round_to_1_decimal(r.get("article_rate_avg", 0.0)),
                     _int_or_zero(r.get("article_view_count", 0)),
                 ))
-                tmpid_to_real[i+1] = cur.lastrowid  # generator가 1부터 tmp id 부여
+                tmp_id_csv = r.get("article_tmp_id")
+                try:
+                    tmp_id = int(tmp_id_csv) if pd.notna(tmp_id_csv) else (i + 1)
+                except Exception:
+                    tmp_id = i + 1
+                tmpid_to_real[tmp_id] = cur.lastrowid  # CSV의 article_tmp_id 우선, 없으면 enumerate 기반
 
             # --- 2) Article_Source UPSERT (press_name UNIQUE) ---
             sql_src = """
@@ -166,6 +170,50 @@ def main():
                 cur.executemany(sql_map, batch)
 
         conn.commit()
+        # --- 4) DailyDigest UPSERT ---
+        if 'article_tmp_id' not in arts.columns:
+            print("[WARN] articles CSV에 'article_tmp_id' 컬럼이 없습니다. DailyDigest 매핑을 건너뜁니다.")
+        else:
+            if digest.empty:
+                print("[SKIP] DailyDigest 스테이징 CSV가 비어 있습니다.")
+            else:
+                sql_digest = """
+                INSERT INTO DailyDigest (ref_date, category, line_no, article_no, one_line_summary)
+                VALUES (%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    one_line_summary = VALUES(one_line_summary),
+                    article_no = VALUES(article_no)
+                """
+                digest_rows_db = []
+                for _, r in digest.iterrows():
+                    ref_date = str(r.get('ref_date', '') or '')
+                    category = str(r.get('category', '') or '')
+                    try:
+                        line_no = int(r.get('line_no', 0) or 0)
+                    except Exception:
+                        line_no = 0
+                    try:
+                        tmp_id = int(r.get('article_tmp_id', 0) or 0)
+                    except Exception:
+                        tmp_id = 0
+                    one_line = str(r.get('one_line_summary', '') or '')[:255]
+
+                    real_id = tmpid_to_real.get(tmp_id)
+                    if not real_id:
+                        # 매핑되지 않은 경우 스킵
+                        continue
+
+                    if ref_date and category and line_no > 0:
+                        digest_rows_db.append((ref_date, category, line_no, real_id, one_line))
+
+                if digest_rows_db:
+                    with conn.cursor() as cur2:
+                        cur2.executemany(sql_digest, digest_rows_db)
+                    conn.commit()
+                    print(f"[OK] DailyDigest upsert 완료 (rows={len(digest_rows_db)})")
+                else:
+                    print("[SKIP] DailyDigest 입력할 행이 없습니다.")
+
         print(f"[OK] DB 저장 완료 "
               f"(articles={len(arts)}, sources upsert={len(uniq)}, mappings inserted={len(map_rows)})")
 
