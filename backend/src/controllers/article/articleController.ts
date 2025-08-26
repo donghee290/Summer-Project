@@ -1,27 +1,74 @@
+// src/controllers/article/articleController.ts
 import { Request, Response } from 'express';
-// 프로젝트 DB 호출 유틸 시그니처를 확인 후 주석을 해제하세요.
-// import { callStoredProcedure } from '../../config/database/database';
+import { callStoredProcedure } from '../../config/database/database'; // ← 실제 프로젝트 경로 유지
 
-// 공통 응답 포맷(프로젝트 컨벤션에 최대한 맞춘 스텁)
+// src/controllers/article/articleController.ts (맨 위 import 들 아래)
+function extractRows(result: any): any[] {
+  // mysql2/promise: CALL 프로시저 결과는 보통 [ [rows], fields ]
+  if (Array.isArray(result)) {
+    // 1) [[...], fields] 형태
+    if (Array.isArray(result[0])) return result[0];
+    // 2) 그냥 [...] 형태로 rows만 올 때
+    return result;
+  }
+  // 3) { rows: [...] } 같은 커스텀 포맷
+  if (result?.rows && Array.isArray(result.rows)) return result.rows;
+
+  // 4) 그 외는 빈 배열
+  return [];
+}
+
+// 공통 응답 헬퍼
 const ok = (res: Response, data: any, message?: string) =>
   res.status(200).json({ success: true, ...(message ? { message } : {}), data });
+
 const fail = (res: Response, status: number, message: string) =>
   res.status(status).json({ success: false, message });
 
+
+
 /**
  * GET /api/articles
- * 세 줄 요약 목록 페이지용 목록 API (페이지네이션)
+ * 쿼리: page, limit, (옵션) keyword, category, searchRange, sort, startDate, endDate
+ * 프로시저: WEB_ARTICLE_LIST(p_keyword, p_category, p_searchRange, p_sort, p_startDate, p_endDate, p_limit, p_offset)
  */
 export const listArticles = async (req: Request, res: Response) => {
   try {
-    const page = Number(req.query.page ?? 1);
-    const limit = Number(req.query.limit ?? 20);
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.max(1, Number(req.query.limit ?? 20));
+    const offset = (page - 1) * limit;
 
-    // const [rows, meta] = await callStoredProcedure('WEB_LIST_ARTICLES', [page, limit]);
-    // return ok(res, { articles: rows, pagination: meta });
+    const keyword = (req.query.keyword as string) ?? '';                // '' 허용
+    const category = (req.query.category as string) ?? '';              // '' 허용
+    const searchRange = (req.query.searchRange as string) || 'title_content';
+    const sort = (req.query.sort as string) || 'latest';
+    const startDate = req.query.startDate ? new Date(String(req.query.startDate)) : null;
+    const endDate   = req.query.endDate   ? new Date(String(req.query.endDate))   : null;
 
-    // 스텁 응답
-    return ok(res, { articles: [], pagination: { page, limit, total: 0, totalPages: 0 } });
+    const raw = await callStoredProcedure('WEB_ARTICLE_LIST', [
+      keyword,
+      category,
+      searchRange,
+      sort,
+      startDate,
+      endDate,
+      limit,
+      offset,
+    ]) as any;
+    const rows = extractRows(raw);
+
+    // WEB_ARTICLE_LIST는 total_count를 각 행에 싣도록 만들어짐
+    const total =
+      Array.isArray(rows) && rows.length > 0 && rows[0]?.total_count
+        ? Number(rows[0].total_count)
+        : 0;
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return ok(res, {
+      articles: rows ?? [],
+      pagination: { page, limit, total, totalPages },
+    });
   } catch (err: any) {
     console.error('[Article] listArticles error:', err);
     return fail(res, 500, '잠시 후 다시 시도해 주세요.');
@@ -30,25 +77,23 @@ export const listArticles = async (req: Request, res: Response) => {
 
 /**
  * GET /api/articles/:id
- * 아티클(기사 요약) 상세 페이지
+ * 프로시저: WEB_ARTICLE_DETAIL(p_article_no)
  */
 export const getArticleDetail = async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return fail(res, 400, '잘못된 아티클 ID');
 
-    
-    //const userNo = (req as any).user?.userNo ?? null;
-    //const [article, userInteractions] = await callStoredProcedure('WEB_GET_ARTICLE_DETAIL', [id, userNo]);
-    
+    const raw = await callStoredProcedure('WEB_ARTICLE_DETAIL', [id]) as any;
+    const rows = extractRows(raw);
 
+    // 프론트는 배열/단건 모두 대응하지만, 배열 형태로 전달
+    const articleArray = Array.isArray(rows) ? rows : rows ? [rows] : [];
 
-    return res.status(200).json({
-      success: true,
-      data: {
-        article: [],
-        userInteractions: { bookmarked: false, liked: false, rated: false, userRating: null },
-      },
+    return ok(res, {
+      article: articleArray,
+      // TODO: 사용자 상호작용은 별도 프로시저 도입 시 교체
+      userInteractions: { bookmarked: false, liked: false, rated: false, userRating: null },
     });
   } catch (err: any) {
     console.error('[Article] getArticleDetail error:', err);
@@ -58,7 +103,8 @@ export const getArticleDetail = async (req: Request, res: Response) => {
 
 /**
  * POST /api/articles/:id/bookmark
- * 북마크 토글 (로그인 필수)
+ * TODO: WEB_TOGGLE_BOOKMARK(article_no, user_no) 프로시저 연결
+ * 인증: verifyToken 미들웨어에서 req.user.userNo 설정 필요
  */
 export const toggleBookmark = async (req: Request, res: Response) => {
   try {
@@ -71,10 +117,13 @@ export const toggleBookmark = async (req: Request, res: Response) => {
     // const [result] = await callStoredProcedure('WEB_TOGGLE_BOOKMARK', [id, userNo]);
     // const bookmarked = !!result?.bookmarked;
 
-    const bookmarked = true; // stub
-    return res
-      .status(200)
-      .json({ success: true, message: bookmarked ? '북마크에 추가되었습니다' : '북마크가 해제되었습니다', bookmarked });
+    // 임시 성공 응답 (프로시저 연결 전)
+    const bookmarked = true;
+    return res.status(200).json({
+      success: true,
+      message: bookmarked ? '북마크에 추가되었습니다' : '북마크가 해제되었습니다',
+      bookmarked,
+    });
   } catch (err: any) {
     console.error('[Article] toggleBookmark error:', err);
     return fail(res, 500, '잠시 후 다시 시도해 주세요.');
@@ -83,7 +132,7 @@ export const toggleBookmark = async (req: Request, res: Response) => {
 
 /**
  * POST /api/articles/:id/like
- * 좋아요 토글 (로그인 필수)
+ * TODO: WEB_TOGGLE_LIKE(article_no, user_no) 프로시저 연결
  */
 export const toggleLike = async (req: Request, res: Response) => {
   try {
@@ -97,11 +146,15 @@ export const toggleLike = async (req: Request, res: Response) => {
     // const liked = !!result?.liked;
     // const likeCount = Number(result?.likeCount ?? 0);
 
-    const liked = true; // stub
-    const likeCount = 1; // stub
-    return res
-      .status(200)
-      .json({ success: true, message: liked ? '좋아요가 등록되었습니다' : '좋아요가 취소되었습니다', liked, likeCount });
+    // 임시 성공 응답 (프로시저 연결 전)
+    const liked = true;
+    const likeCount = 1;
+    return res.status(200).json({
+      success: true,
+      message: liked ? '좋아요가 등록되었습니다' : '좋아요가 취소되었습니다',
+      liked,
+      likeCount,
+    });
   } catch (err: any) {
     console.error('[Article] toggleLike error:', err);
     return fail(res, 500, '잠시 후 다시 시도해 주세요.');
@@ -110,7 +163,7 @@ export const toggleLike = async (req: Request, res: Response) => {
 
 /**
  * POST /api/articles/:id/rating
- * 별점 등록 (1회만, 수정 불가)
+ * TODO: WEB_CREATE_RATING(article_no, user_no, rating) 프로시저 연결
  */
 export const createRating = async (req: Request, res: Response) => {
   try {
@@ -125,18 +178,17 @@ export const createRating = async (req: Request, res: Response) => {
       return fail(res, 400, '별점은 1~5 사이의 정수여야 합니다');
     }
 
-    // try {
-    //   const [result] = await callStoredProcedure('WEB_CREATE_RATING', [id, userNo, rating]);
-    //   return res.status(200).json({ success: true, message: '별점이 등록되었습니다', data: result });
-    // } catch (e: any) {
-    //   if (e?.code === 'ALREADY_RATED') return fail(res, 400, '이미 평가한 아티클입니다');
-    //   throw e;
-    // }
+    // const [result] = await callStoredProcedure('WEB_CREATE_RATING', [id, userNo, rating]);
+    // return res.status(200).json({ success: true, message: '별점이 등록되었습니다', data: result });
 
-    return res
-      .status(200)
-      .json({ success: true, message: '별점이 등록되었습니다', data: { userRating: rating, avgRating: 0, ratingCount: 0 } });
+    // 임시 성공 응답 (프로시저 연결 전)
+    return res.status(200).json({
+      success: true,
+      message: '별점이 등록되었습니다',
+      data: { userRating: rating, avgRating: rating, ratingCount: 1 },
+    });
   } catch (err: any) {
+    if (err?.code === 'ALREADY_RATED') return fail(res, 400, '이미 평가한 아티클입니다');
     console.error('[Article] createRating error:', err);
     return fail(res, 500, '잠시 후 다시 시도해 주세요.');
   }
@@ -144,20 +196,43 @@ export const createRating = async (req: Request, res: Response) => {
 
 /**
  * GET /api/articles/search
- * 아티클 검색 (키워드/카테고리)
+ * 목록 프로시저를 재사용하여 키워드/카테고리 검색
  */
 export const searchArticles = async (req: Request, res: Response) => {
   try {
-    const keyword = (req.query.keyword as string) ?? null;
-    const category = (req.query.category as string) ?? null;
-    const page = Number(req.query.page ?? 1);
-    const limit = Number(req.query.limit ?? 20);
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.max(1, Number(req.query.limit ?? 20));
+    const offset = (page - 1) * limit;
 
-    // const [rows, meta] = await callStoredProcedure('WEB_SEARCH_ARTICLES', [keyword, category, page, limit]);
+    const keyword = (req.query.keyword as string) ?? '';
+    const category = (req.query.category as string) ?? '';
+    const searchRange = (req.query.searchRange as string) || 'title_content';
+    const sort = (req.query.sort as string) || 'latest';
+    const startDate = req.query.startDate ? new Date(String(req.query.startDate)) : null;
+    const endDate   = req.query.endDate   ? new Date(String(req.query.endDate))   : null;
+
+    const raw = await callStoredProcedure('WEB_ARTICLE_LIST', [
+      keyword,
+      category,
+      searchRange,
+      sort,
+      startDate,
+      endDate,
+      limit,
+      offset,
+    ]) as any;
+    const rows = extractRows(raw);
+
+    const total =
+      Array.isArray(rows) && rows.length > 0 && rows[0]?.total_count
+        ? Number(rows[0].total_count)
+        : 0;
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
 
     return ok(res, {
-      articles: [],
-      pagination: { page, limit, total: 0, totalPages: 0 },
+      articles: rows ?? [],
+      pagination: { page, limit, total, totalPages },
       searchInfo: { keyword, category },
     });
   } catch (err: any) {
@@ -168,19 +243,25 @@ export const searchArticles = async (req: Request, res: Response) => {
 
 /**
  * GET /api/articles/bookmarks/my
- * 내 북마크 목록 (로그인 필수)
+ * TODO: WEB_LIST_BOOKMARKS(user_no, page, limit) 같은 프로시저가 준비되면 연결
  */
 export const listMyBookmarks = async (req: Request, res: Response) => {
   try {
     const userNo = (req as any).user?.userNo;
     if (!userNo) return fail(res, 401, '인증 필요');
 
-    const page = Number(req.query.page ?? 1);
-    const limit = Number(req.query.limit ?? 20);
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.max(1, Number(req.query.limit ?? 20));
 
-    // const [rows, meta] = await callStoredProcedure('WEB_LIST_BOOKMARKS', [userNo, page, limit]);
+    // const offset = (page - 1) * limit;
+    // const [rows] = await callStoredProcedure('WEB_LIST_BOOKMARKS', [userNo, page, limit]);
+    // const total = rows?.[0]?.total_count ?? 0;
 
-    return ok(res, { articles: [], pagination: { page, limit, total: 0, totalPages: 0 } });
+    // 임시 빈 응답 (프로시저 연결 전)
+    return ok(res, {
+      articles: [],
+      pagination: { page, limit, total: 0, totalPages: 1 },
+    });
   } catch (err: any) {
     console.error('[Article] listMyBookmarks error:', err);
     return fail(res, 500, '잠시 후 다시 시도해 주세요.');

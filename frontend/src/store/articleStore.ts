@@ -76,20 +76,60 @@ export const useArticleStore = create<ArticleState>((set, get) => ({
   // ===== 목록 불러오기 =====
   loadList: async (page = get().pagination.page, limit = get().pagination.limit) => {
     try {
+      console.log('[articleStore] loadList:start', { page, limit });
       set({ loading: true, error: undefined });
       const res: ArticleListResponse = await getArticles(page, limit);
-      set({
-        list: res.data.articles ?? [],
+
+      // 안전 언랩: axios 응답(data.data) 또는 data 직접 반환 케이스 모두 지원
+      const payload: any = (res as any)?.data?.data ?? (res as any)?.data ?? res;
+
+      // 목록 데이터 추출 (articles 키 미존재 시 대비)
+      const rawItems: any[] = payload?.articles ?? payload?.data?.articles ?? [];
+
+      // 프론트에서 기대하는 키로 정규화 (avg_rating / likes_count)
+      const normalized: ArticleListItem[] = rawItems.map((row: any) => ({
+        ...row,
+        avg_rating: row?.avg_rating ?? row?.article_rate_avg ?? 0,
+        likes_count: row?.likes_count ?? row?.article_like_count ?? 0,
+        article_press: row?.article_press ?? null,
+      }));
+
+      // 페이지네이션 계산 (payload.pagination 우선, 없으면 추론)
+      const p = payload?.pagination ?? {};
+      const total = typeof p?.total === 'number'
+        ? p.total
+        : (normalized.length > 0 && typeof (normalized[0] as any).total_count === 'number'
+            ? Number((normalized[0] as any).total_count)
+            : normalized.length);
+
+      const totalPages = typeof p?.totalPages === 'number'
+        ? p.totalPages
+        : Math.ceil(total / Math.max(1, limit));
+
+      console.log('[articleStore] loadList:success', {
+        count: normalized.length,
         pagination: {
-          page: res.data.pagination.page,
-          limit: res.data.pagination.limit,
-          total: res.data.pagination.total,
-          totalPages: res.data.pagination.totalPages,
+          page: typeof p?.page === 'number' ? p.page : page,
+          limit: typeof p?.limit === 'number' ? p.limit : limit,
+          total,
+          totalPages,
+        },
+      });
+
+      set({
+        list: normalized,
+        pagination: {
+          page: typeof p?.page === 'number' ? p.page : page,
+          limit: typeof p?.limit === 'number' ? p.limit : limit,
+          total,
+          totalPages,
         },
       });
     } catch (e: any) {
+      console.error('[articleStore] loadList:error', e);
       set({ error: e?.message || '기사 목록을 불러오지 못했습니다.' });
     } finally {
+      console.log('[articleStore] loadList:done');
       set({ loading: false });
     }
   },
@@ -103,7 +143,7 @@ export const useArticleStore = create<ArticleState>((set, get) => ({
   },
 
   // ===== 상세 불러오기 =====
-  loadDetail: async (id: number) => {
+  /*loadDetail: async (id: number) => {
     try {
       set({ loading: true, error: undefined, detail: undefined, interactions: undefined });
       const res: ArticleDetailResponse = await getArticleById(id);
@@ -115,6 +155,54 @@ export const useArticleStore = create<ArticleState>((set, get) => ({
     } catch (e: any) {
       set({ error: e?.message || '기사 상세를 불러오지 못했습니다.' });
     } finally {
+      set({ loading: false });
+    }
+  },*/
+  loadDetail: async (id: number) => {
+    try {
+      console.log('[articleStore] loadDetail:start', { id });
+      set({ loading: true, error: undefined, detail: undefined, interactions: undefined });
+      const res: ArticleDetailResponse = await getArticleById(id);
+
+      // 응답 안전 파싱: res.data.data 또는 res.data 모두 대응
+      const payload: any = (res as any)?.data?.data ?? (res as any)?.data ?? res;
+
+      // article이 배열/객체 어떤 형태든 처리
+      const article: Article | undefined = Array.isArray(payload?.article)
+        ? payload.article[0]
+        : payload?.article;
+
+      // userInteractions가 없을 때 기본값
+      const interactions: UserInteractions | undefined =
+        payload?.userInteractions ?? { bookmarked: false, liked: false, rated: false, userRating: null };
+
+      if (!article) {
+        set({ error: '기사 상세를 불러오지 못했습니다.' });
+      }
+
+      // Normalize rating field names so UI can always read avg_rating
+      const normalizedArticle = article
+        ? {
+            ...article,
+            avg_rating: (article as any)?.avg_rating ?? (article as any)?.article_rate_avg ?? 0,
+            article_rate_avg: (article as any)?.article_rate_avg ?? (article as any)?.avg_rating ?? 0,
+          }
+        : undefined;
+
+      console.log('[articleStore] loadDetail:success', {
+        hasArticle: Boolean(normalizedArticle),
+        interactions,
+      });
+
+      set({
+        detail: normalizedArticle,
+        interactions,
+      });
+    } catch (e: any) {
+      console.error('[articleStore] loadDetail:error', e);
+      set({ error: e?.message || '기사 상세를 불러오지 못했습니다.' });
+    } finally {
+      console.log('[articleStore] loadDetail:done');
       set({ loading: false });
     }
   },
@@ -183,7 +271,7 @@ export const useArticleStore = create<ArticleState>((set, get) => ({
     }
   },
 
-  rate: async (rating, id) => {
+  /*rate: async (rating, id) => {
     const state = get();
     const targetId = id ?? state.detail?.article_no;
     if (!targetId) return;
@@ -213,8 +301,46 @@ export const useArticleStore = create<ArticleState>((set, get) => ({
       if (prevInteractions) set({ interactions: prevInteractions });
       set({ error: '별점 처리 중 오류가 발생했습니다.' });
     }
-  },
+  },*/
+  rate: async (rating, id) => {
+    const state = get();
+    const targetId = id ?? state.detail?.article_no;
+    if (!targetId) return;
 
+    const prevInteractions = state.interactions;
+    const prevArticle = state.detail;
+
+    if (prevInteractions) {
+      set({ interactions: { ...prevInteractions, rated: true, userRating: rating } });
+    }
+
+    try {
+      const res = await apiAddRating(targetId, rating);
+      if ((res as any).data) {
+        const { avgRating } = (res as any).data;
+        if (prevArticle) {
+          const nextAvg =
+            typeof avgRating === 'number'
+              ? avgRating
+              : ((prevArticle as any)?.avg_rating ?? (prevArticle as any)?.article_rate_avg ?? null);
+
+          // Prepare a patch that updates whichever keys exist, and also ensures both are present for rendering
+          const patched: any = { ...prevArticle };
+
+          // If UI reads avg_rating, keep it updated
+          patched.avg_rating = nextAvg;
+
+          // If some components still read article_rate_avg, keep that in sync too
+          patched.article_rate_avg = nextAvg;
+
+          set({ detail: patched });
+        }
+      }
+    } catch (e) {
+      if (prevInteractions) set({ interactions: prevInteractions });
+      set({ error: '별점 처리 중 오류가 발생했습니다.' });
+    }
+},
   // ===== 내 북마크 목록 (옵션) =====
   loadMyBookmarks: async (page = 1, limit = 20) => {
     try {
@@ -235,3 +361,14 @@ export const useArticleStore = create<ArticleState>((set, get) => ({
   toggleLikeCurrent: async (id?: number) => get().toggleLike(id),
   rateCurrent: async (rating: number, id?: number) => get().rate(rating, id),
 }));
+
+// Expose store to window for debugging in DevTools
+// Usage in Console: __articleStore.getState(), __articleStore.subscribe(fn)
+if (typeof window !== 'undefined') {
+  (window as any).__articleStore = {
+    getState: (useArticleStore as any).getState,
+    setState: (useArticleStore as any).setState,
+    subscribe: (useArticleStore as any).subscribe,
+  };
+  console.log('[articleStore] debugging hooks attached → window.__articleStore');
+}

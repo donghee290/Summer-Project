@@ -4,9 +4,14 @@ import { Link } from 'react-router-dom';
 import { useArticleStore } from '../../store/articleStore';
 
 export default function ArticleListPage() {
+  console.log('[ArticleListPage] render');
   const { list, pagination, loading, error, loadList } = useArticleStore();
 
+
+
+  
   useEffect(() => {
+    console.log('[ArticleListPage] useEffect → loadList');
     loadList(1,20 );
   }, [loadList]);
 
