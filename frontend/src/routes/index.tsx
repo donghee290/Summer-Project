@@ -25,8 +25,8 @@ export default function AppRoutes() {
         <Route path="/search" element={<Layout><SearchPage /></Layout>} />
 
         {/* Articles: 공용 목록 & 상세 */}
-        <Route path="/articles" element={<Layout><ArticleListPage /></Layout>} />
-        <Route path="/articles/:articleId" element={<Layout><ArticleDetailPage /></Layout>} />
+        <Route path="/articles/:id" element={<Layout><ArticleDetailPage/></Layout>} />
+        <Route path="/articles/:articleNo" element={<Layout><ArticleDetailPage/></Layout>} />
 
         {/* Articles: 카테고리 Top3 페이지 */}
         <Route path="/koreaeconomy" element={<Layout><ArticlesPage /></Layout>} />
