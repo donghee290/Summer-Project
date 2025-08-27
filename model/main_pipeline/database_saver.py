@@ -6,11 +6,34 @@ from typing import List, Tuple
 import pymysql
 from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(find_dotenv(), override=True)
-
 HERE = Path(__file__).resolve()
 PROJECT_ROOT = HERE.parents[2]
 GEN_DIR = PROJECT_ROOT / "model" / "results" / "generate_results"
+
+def _load_env():
+    """Load .env from well-known locations, preferring project root; log the chosen path."""
+    candidates = [
+        PROJECT_ROOT / ".env",
+        PROJECT_ROOT / ".env.local",
+        HERE.parent / ".env",              # model/main_pipeline/.env
+        HERE / ".env",                      # same folder as this file
+        Path.cwd() / ".env",                # current working directory
+    ]
+    for p in candidates:
+        if p.exists():
+            load_dotenv(p, override=True)
+            print(f"[ENV] loaded: {p}")
+            return True
+    # fallback to default search (just in case)
+    p = find_dotenv(usecwd=True)
+    if p:
+        load_dotenv(p, override=True)
+        print(f"[ENV] loaded via find_dotenv: {p}")
+        return True
+    print("[ENV] WARNING: .env not found in expected locations; using process environment only")
+    return False
+
+_load_env()
 
 def _latest_or_default(glob_pat: str, default_name: str) -> Path:
     files = sorted(GEN_DIR.glob(glob_pat), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -48,6 +71,7 @@ def get_connection():
             )
         return _connect()
     else:
+        print(f"[DB] connecting host={os.getenv('DB_HOST', '127.0.0.1')} port={os.getenv('DB_PORT', '3306')} db={os.getenv('DB_NAME', 'newsdb')}")
         return pymysql.connect(
             host=os.getenv("DB_HOST", "127.0.0.1"),
             port=int(os.getenv("DB_PORT", "3306")),
